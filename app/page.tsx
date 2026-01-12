@@ -7,30 +7,38 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import axios from 'axios';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { BotLogDialog } from '@/components/BotLogDialog';
+import { CreateBotDialog } from '@/components/CreateBotDialog';
+
+// Configuración centralizada del API
+const API_BASE_URL = 'http://localhost:5000';
 
 export default function Home() {
   const [dataBots, setDataBots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedBotId, setSelectedBotId] = useState<number | undefined>(undefined);
   const router = useRouter();
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const response = await axios.get('http://localhost:5000/api/bots');
-        setDataBots(response.data);
-      } catch (error) {
-        console.error('Error fetching bots:', error);
-      } finally {
-        setLoading(false);
-      }
+  // Función para cargar bots (reutilizable)
+  const fetchBots = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/bots`);
+      setDataBots(response.data);
+    } catch (error) {
+      console.error('Error fetching bots:', error);
+    } finally {
+      setLoading(false);
     }
-    fetchData();
   }, []);
+
+  useEffect(() => {
+    fetchBots();
+  }, [fetchBots]);
 
   const columns: GridColDef[] = [
     { 
@@ -47,6 +55,19 @@ export default function Home() {
       flex: 1
     },
     { 
+      field: 'source', 
+      headerName: 'Fuente', 
+      width: 150,
+      renderCell: (params) => (
+        <Chip 
+          label={params.value || 'N/A'}
+          size="small"
+          variant="outlined"
+          color="primary"
+        />
+      )
+    },
+    { 
       field: 'isActive', 
       headerName: 'Estado', 
       width: 130,
@@ -59,15 +80,62 @@ export default function Home() {
       )
     },
     { 
+      field: 'status', 
+      headerName: 'Ejecución', 
+      width: 120,
+      renderCell: (params) => {
+        const statusColors: Record<string, 'default' | 'info' | 'success' | 'error' | 'warning'> = {
+          'idle': 'default',
+          'running': 'info',
+          'completed': 'success',
+          'error': 'error',
+        };
+        return (
+          <Chip 
+            label={params.value || 'idle'}
+            color={statusColors[params.value] || 'default'}
+            size="small"
+            variant="outlined"
+          />
+        );
+      }
+    },
+    { 
+      field: 'totalScraped', 
+      headerName: 'Total Scrapeado', 
+      width: 130,
+      headerAlign: 'center',
+      align: 'center',
+      renderCell: (params) => (
+        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+          {params.value || 0}
+        </Typography>
+      )
+    },
+    { 
       field: 'url', 
       headerName: 'URL', 
-      width: 300,
-      flex: 1
+      width: 250,
+      flex: 1,
+      renderCell: (params) => (
+        <Typography 
+          variant="body2" 
+          sx={{ 
+            overflow: 'hidden', 
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: 'text.secondary'
+          }}
+          title={params.value}
+        >
+          {params.value}
+        </Typography>
+      )
     },
     { 
       field: 'createdAt', 
-      headerName: 'Fecha de Creación', 
-      width: 180,
+      headerName: 'Creado', 
+      width: 160,
       valueFormatter: (value) => {
         return new Date(value).toLocaleString('es-CL');
       }
@@ -78,9 +146,9 @@ export default function Home() {
       width: 220,
       headerAlign: 'center',
       align: 'center',
+      sortable: false,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', gap: 1 }}>
-          {/* NUEVO: Botón para ver logs sin ejecutar */}
           <Button 
             variant="outlined" 
             size="small"
@@ -91,13 +159,14 @@ export default function Home() {
               borderRadius: 2
             }}
           >
-            Ver Logs
+            Logs
           </Button>
           <Button 
             variant="contained" 
             size="small"
             startIcon={<PlayArrowIcon />}
             onClick={() => handleRunBot(params.row.id)}
+            disabled={!params.row.isActive || params.row.status === 'running'}
             sx={{
               textTransform: 'none',
               borderRadius: 2
@@ -110,7 +179,7 @@ export default function Home() {
     }
   ];
 
-  // NUEVO: Handler para ver logs sin ejecutar
+  // Handler para ver logs sin ejecutar
   const handleViewLogs = (botId: number) => {
     setSelectedBotId(botId);
     setLogDialogOpen(true);
@@ -118,8 +187,10 @@ export default function Home() {
 
   const handleRunBot = async (botId: number) => {
     try {
-      const response = await axios.post(`http://localhost:5000/api/bots/${botId}/run`);
-      alert(response.data.message);
+      const response = await axios.post(`${API_BASE_URL}/api/bots/${botId}/run`);
+      
+      // Refrescar la lista para ver el cambio de estado
+      fetchBots();
       
       // Abrir automáticamente el logger con el botId específico
       setSelectedBotId(botId);
@@ -133,17 +204,31 @@ export default function Home() {
     router.push('/dashboards');
   };
 
-  // NUEVO: Handler para abrir logs generales (sin botId específico)
+  // Handler para abrir logs generales (sin botId específico)
   const handleOpenGeneralLogs = () => {
     setSelectedBotId(undefined);
     setLogDialogOpen(true);
   };
 
-  // NUEVO: Handler para cerrar y limpiar el botId seleccionado
-  const handleCloseDialog = () => {
+  // Handler para cerrar dialog de logs
+  const handleCloseLogDialog = () => {
     setLogDialogOpen(false);
-    // Pequeño delay antes de limpiar el botId para evitar glitches visuales
     setTimeout(() => setSelectedBotId(undefined), 300);
+  };
+
+  // Handler para abrir dialog de crear bot
+  const handleOpenCreateDialog = () => {
+    setCreateDialogOpen(true);
+  };
+
+  // Handler para cerrar dialog de crear bot
+  const handleCloseCreateDialog = () => {
+    setCreateDialogOpen(false);
+  };
+
+  // Callback cuando se crea un bot exitosamente
+  const handleBotCreated = () => {
+    fetchBots(); // Refrescar la tabla
   };
 
   return (
@@ -167,7 +252,9 @@ export default function Home() {
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center',
-            marginBottom: 3
+            marginBottom: 3,
+            flexWrap: 'wrap',
+            gap: 2
           }}
         >
           <Box>
@@ -187,7 +274,7 @@ export default function Home() {
             </Typography>
           </Box>
           
-          <Box sx={{ display: 'flex', gap: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             {/* Botón para ver logs generales (todos los bots) */}
             <Button
               variant="contained"
@@ -223,7 +310,7 @@ export default function Home() {
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => console.log('Crear nuevo bot')}
+              onClick={handleOpenCreateDialog}
               sx={{
                 textTransform: 'none',
                 borderRadius: 2,
@@ -265,12 +352,19 @@ export default function Home() {
         </Box>
       </Paper>
 
-      {/* Dialog de logs en tiempo real - MEJORADO */}
+      {/* Dialog de logs en tiempo real */}
       <BotLogDialog
         open={logDialogOpen}
-        onClose={handleCloseDialog}
+        onClose={handleCloseLogDialog}
         autoConnect={true}
-        botId={selectedBotId} // Pasa el botId seleccionado o undefined
+        botId={selectedBotId}
+      />
+
+      {/* Dialog para crear nuevo bot */}
+      <CreateBotDialog
+        open={createDialogOpen}
+        onClose={handleCloseCreateDialog}
+        onBotCreated={handleBotCreated}
       />
     </Box>
   );
