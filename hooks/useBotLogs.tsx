@@ -89,6 +89,28 @@ export function useBotLogs(options: UseBotLogsOptions = {}): UseBotLogsReturn {
 
       // --- EVENT HANDLERS CON FILTRO DE SEGURIDAD ---
 
+      // Historial recibido de una sola vez al suscribirse (para clientes que se conectan tarde o reconectan)
+      connection.on('ReceiveHistory', (history: BotLog[]) => {
+        const filtered = botId
+          ? history.filter((log) => !log.botId || log.botId === botId)
+          : history;
+
+        // Reemplazar con historial del backend (fuente de verdad).
+        // Los logs en tiempo real acumulados localmente se fusionan después.
+        setLogs((prevLogs) => {
+          // Combinar historial del backend con logs locales más recientes no incluidos en el historial.
+          // Usar timestamp del último log del historial como corte.
+          const lastHistoryTs = filtered.length > 0
+            ? filtered[filtered.length - 1].timestamp
+            : null;
+          const newLocal = lastHistoryTs
+            ? prevLogs.filter((l) => l.timestamp > lastHistoryTs)
+            : [];
+          const merged = [...filtered, ...newLocal];
+          return merged.slice(-maxLogs);
+        });
+      });
+
       connection.on('ReceiveLogMessage', (log: BotLog) => {
         // FILTRO: Si estamos viendo un bot específico, ignorar logs de otros bots.
         // Si botId es undefined (Global), permitimos todo.
@@ -98,8 +120,8 @@ export function useBotLogs(options: UseBotLogsOptions = {}): UseBotLogsReturn {
 
         setLogs((prevLogs) => {
           const newLogs = [...prevLogs, log];
-          return newLogs.length > maxLogs 
-            ? newLogs.slice(newLogs.length - maxLogs) 
+          return newLogs.length > maxLogs
+            ? newLogs.slice(newLogs.length - maxLogs)
             : newLogs;
         });
       });
@@ -156,6 +178,7 @@ export function useBotLogs(options: UseBotLogsOptions = {}): UseBotLogsReturn {
   const disconnect = useCallback(() => {
     if (connectionRef.current) {
       isCleaningUpRef.current = true;
+      connectionRef.current.off('ReceiveHistory');
       connectionRef.current.off('ReceiveLogMessage');
       connectionRef.current.off('ReceiveProgress');
       

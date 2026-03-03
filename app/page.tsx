@@ -6,6 +6,7 @@ import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import BarChartIcon from '@mui/icons-material/BarChart';
 import axios from 'axios';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -296,12 +297,18 @@ export default function Home() {
             </Button>
 
             <Button
-              variant="outlined"
+              variant="contained"
+              startIcon={<BarChartIcon />}
               onClick={handleGoToDashboard}
               sx={{
                 textTransform: 'none',
                 borderRadius: 2,
-                paddingX: 3
+                paddingX: 3,
+                background: 'linear-gradient(45deg, #1565c0 30%, #1976d2 90%)',
+                boxShadow: '0 3px 5px 2px rgba(25, 118, 210, .3)',
+                '&:hover': {
+                  background: 'linear-gradient(45deg, #0d47a1 30%, #1565c0 90%)',
+                }
               }}
             >
               Ver Dashboard
