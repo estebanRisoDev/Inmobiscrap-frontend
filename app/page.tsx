@@ -1,6 +1,8 @@
 'use client';
+// app/page.tsx — agrega header con usuario/logout y pasa authHeaders a las llamadas API
 
-import { Button, Box, Typography, Paper, Chip, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, CircularProgress } from '@mui/material';
+import { Button, Box, Typography, Paper, Chip, Dialog, DialogTitle, DialogContent,
+  DialogContentText, DialogActions, CircularProgress, Avatar, IconButton } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import AddIcon from '@mui/icons-material/Add';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -9,11 +11,14 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import BarChartIcon from '@mui/icons-material/BarChart';
+import LogoutIcon from '@mui/icons-material/Logout';
 import axios from 'axios';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { BotLogDialog } from '@/components/BotLogDialog';
 import { CreateBotDialog } from '@/components/CreateBotDialog';
+import { useAuth } from '@/context/AuthContext';
+import { authHeaders } from '@/lib/auth';
 
 const API_BASE_URL = 'http://localhost:5000';
 
@@ -38,41 +43,36 @@ export default function Home() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [selectedBotId, setSelectedBotId] = useState<number | undefined>(undefined);
 
-  // Estado para el diálogo de confirmación de eliminación
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; bot: Bot | null; deleting: boolean }>({
-    open: false,
-    bot: null,
-    deleting: false,
+    open: false, bot: null, deleting: false,
   });
-
-  // Estado para el diálogo de confirmación de detención
   const [stopDialog, setStopDialog] = useState<{ open: boolean; bot: Bot | null; stopping: boolean }>({
-    open: false,
-    bot: null,
-    stopping: false,
+    open: false, bot: null, stopping: false,
   });
 
   const router = useRouter();
+  const { user, logout } = useAuth();
 
   const fetchBots = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/bots`);
+      const response = await axios.get(`${API_BASE_URL}/api/bots`, { headers: authHeaders() });
       setDataBots(response.data);
-    } catch (error) {
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        logout();
+      }
       console.error('Error fetching bots:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [logout]);
 
   useEffect(() => {
     fetchBots();
-    const interval = setInterval(fetchBots, 15000); // Refresh cada 15s para ver estados
+    const interval = setInterval(fetchBots, 15000);
     return () => clearInterval(interval);
   }, [fetchBots]);
-
-  // ─── Handlers ───────────────────────────────────────────────────────────────
 
   const handleViewLogs = (botId: number) => {
     setSelectedBotId(botId);
@@ -81,7 +81,7 @@ export default function Home() {
 
   const handleRunBot = async (botId: number) => {
     try {
-      await axios.post(`${API_BASE_URL}/api/bots/${botId}/run`);
+      await axios.post(`${API_BASE_URL}/api/bots/${botId}/run`, {}, { headers: authHeaders() });
       fetchBots();
       setSelectedBotId(botId);
       setLogDialogOpen(true);
@@ -90,15 +90,11 @@ export default function Home() {
     }
   };
 
-  const handleStopClick = (bot: Bot) => {
-    setStopDialog({ open: true, bot, stopping: false });
-  };
-
   const handleStopConfirm = async () => {
     if (!stopDialog.bot) return;
     setStopDialog((prev) => ({ ...prev, stopping: true }));
     try {
-      await axios.post(`${API_BASE_URL}/api/bots/${stopDialog.bot.id}/stop`);
+      await axios.post(`${API_BASE_URL}/api/bots/${stopDialog.bot.id}/stop`, {}, { headers: authHeaders() });
       fetchBots();
     } catch (error: any) {
       alert(error.response?.data?.message || 'Error al detener el bot');
@@ -107,15 +103,11 @@ export default function Home() {
     }
   };
 
-  const handleDeleteClick = (bot: Bot) => {
-    setDeleteDialog({ open: true, bot, deleting: false });
-  };
-
   const handleDeleteConfirm = async () => {
     if (!deleteDialog.bot) return;
     setDeleteDialog((prev) => ({ ...prev, deleting: true }));
     try {
-      await axios.delete(`${API_BASE_URL}/api/bots/${deleteDialog.bot.id}`);
+      await axios.delete(`${API_BASE_URL}/api/bots/${deleteDialog.bot.id}`, { headers: authHeaders() });
       fetchBots();
     } catch (error: any) {
       alert(error.response?.data?.message || 'Error al eliminar el bot');
@@ -123,20 +115,6 @@ export default function Home() {
       setDeleteDialog({ open: false, bot: null, deleting: false });
     }
   };
-
-  const handleGoToDashboard = () => router.push('/dashboards');
-
-  const handleOpenGeneralLogs = () => {
-    setSelectedBotId(undefined);
-    setLogDialogOpen(true);
-  };
-
-  const handleCloseLogDialog = () => {
-    setLogDialogOpen(false);
-    setTimeout(() => setSelectedBotId(undefined), 300);
-  };
-
-  // ─── Columnas ───────────────────────────────────────────────────────────────
 
   const STATUS_CONFIG: Record<string, { color: 'default' | 'info' | 'success' | 'error' | 'warning'; label: string }> = {
     idle:      { color: 'default',  label: 'Inactivo' },
@@ -151,46 +129,29 @@ export default function Home() {
     { field: 'name', headerName: 'Nombre', width: 220, flex: 1 },
     {
       field: 'source', headerName: 'Fuente', width: 140,
-      renderCell: (params) => (
-        <Chip label={params.value || 'N/A'} size="small" variant="outlined" color="primary" />
-      ),
+      renderCell: (params) => <Chip label={params.value || 'N/A'} size="small" variant="outlined" color="primary" />,
     },
     {
       field: 'isActive', headerName: 'Activo', width: 100,
-      renderCell: (params) => (
-        <Chip
-          label={params.value ? 'Sí' : 'No'}
-          color={params.value ? 'success' : 'default'}
-          size="small"
-        />
-      ),
+      renderCell: (params) => <Chip label={params.value ? 'Sí' : 'No'} color={params.value ? 'success' : 'default'} size="small" />,
     },
     {
       field: 'status', headerName: 'Estado', width: 130,
       renderCell: (params) => {
         const cfg = STATUS_CONFIG[params.value] ?? { color: 'default', label: params.value || 'idle' };
         return (
-          <Chip
-            label={cfg.label}
-            color={cfg.color}
-            size="small"
-            variant="outlined"
-            sx={params.value === 'running' ? { animation: 'pulse 1.5s infinite' } : {}}
-          />
+          <Chip label={cfg.label} color={cfg.color} size="small" variant="outlined"
+            sx={params.value === 'running' ? { animation: 'pulse 1.5s infinite' } : {}} />
         );
       },
     },
     {
       field: 'totalScraped', headerName: 'Total', width: 90, headerAlign: 'center', align: 'center',
-      renderCell: (params) => (
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>{(params.value || 0).toLocaleString('es-CL')}</Typography>
-      ),
+      renderCell: (params) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{(params.value || 0).toLocaleString('es-CL')}</Typography>,
     },
     {
       field: 'lastRunCount', headerName: 'Último run', width: 100, headerAlign: 'center', align: 'center',
-      renderCell: (params) => (
-        <Typography variant="body2" sx={{ color: 'text.secondary' }}>{params.value || 0}</Typography>
-      ),
+      renderCell: (params) => <Typography variant="body2" sx={{ color: 'text.secondary' }}>{params.value || 0}</Typography>,
     },
     {
       field: 'url', headerName: 'URL', width: 200, flex: 1,
@@ -205,67 +166,35 @@ export default function Home() {
       valueFormatter: (value) => value ? new Date(value).toLocaleString('es-CL') : '—',
     },
     {
-      field: 'actions',
-      headerName: 'Acciones',
-      width: 290,
-      headerAlign: 'center',
-      align: 'center',
-      sortable: false,
+      field: 'actions', headerName: 'Acciones', width: 290, headerAlign: 'center', align: 'center', sortable: false,
       renderCell: (params) => {
         const bot: Bot = params.row;
-        const isRunning = bot.status === 'running';
+        const isRunning  = bot.status === 'running';
         const isStopping = bot.status === 'stopping';
         return (
           <Box sx={{ display: 'flex', gap: 0.75 }}>
-            {/* Logs */}
-            <Button
-              variant="outlined"
-              size="small"
-              startIcon={<VisibilityIcon />}
-              onClick={() => handleViewLogs(bot.id)}
-              sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}
-            >
+            <Button variant="outlined" size="small" startIcon={<VisibilityIcon />}
+              onClick={() => handleViewLogs(bot.id)} sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}>
               Logs
             </Button>
-
-            {/* Ejecutar — oculto si está corriendo o deteniendo */}
             {!isRunning && !isStopping && (
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<PlayArrowIcon />}
-                onClick={() => handleRunBot(bot.id)}
-                disabled={!bot.isActive}
-                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#1565c0' }}
-              >
+              <Button variant="contained" size="small" startIcon={<PlayArrowIcon />}
+                onClick={() => handleRunBot(bot.id)} disabled={!bot.isActive}
+                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#1565c0' }}>
                 Ejecutar
               </Button>
             )}
-
-            {/* Detener — solo si está running */}
             {(isRunning || isStopping) && (
-              <Button
-                variant="contained"
-                size="small"
+              <Button variant="contained" size="small"
                 startIcon={isStopping ? <CircularProgress size={14} color="inherit" /> : <StopIcon />}
-                onClick={() => handleStopClick(bot)}
-                disabled={isStopping}
-                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#e65100' }}
-              >
+                onClick={() => setStopDialog({ open: true, bot, stopping: false })} disabled={isStopping}
+                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#e65100' }}>
                 {isStopping ? 'Deteniendo' : 'Detener'}
               </Button>
             )}
-
-            {/* Eliminar */}
-            <Button
-              variant="outlined"
-              size="small"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={() => handleDeleteClick(bot)}
-              disabled={isRunning || isStopping}
-              sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}
-            >
+            <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />}
+              onClick={() => setDeleteDialog({ open: true, bot, deleting: false })} disabled={isRunning || isStopping}
+              sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}>
               Eliminar
             </Button>
           </Box>
@@ -277,6 +206,7 @@ export default function Home() {
   return (
     <Box sx={{ padding: 4, backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
       <Paper elevation={3} sx={{ padding: 3, borderRadius: 2 }}>
+
         {/* Header */}
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
           <Box>
@@ -288,40 +218,42 @@ export default function Home() {
             </Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<TimelineIcon />}
-              onClick={handleOpenGeneralLogs}
-              sx={{
-                textTransform: 'none', borderRadius: 2, px: 3,
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Info usuario */}
+            {user && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1, bgcolor: '#f0f4ff', borderRadius: 2 }}>
+                <Avatar src={user.avatarUrl} sx={{ width: 32, height: 32, bgcolor: '#1976d2', fontSize: '0.8rem' }}>
+                  {user.name[0].toUpperCase()}
+                </Avatar>
+                <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>{user.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{user.role}</Typography>
+                </Box>
+                <IconButton size="small" onClick={logout} title="Cerrar sesión">
+                  <LogoutIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            )}
+
+            <Button variant="contained" color="secondary" startIcon={<TimelineIcon />}
+              onClick={() => { setSelectedBotId(undefined); setLogDialogOpen(true); }}
+              sx={{ textTransform: 'none', borderRadius: 2, px: 3,
                 background: 'linear-gradient(45deg, #667eea 30%, #764ba2 90%)',
-                boxShadow: '0 3px 5px 2px rgba(102, 126, 234, .3)',
-              }}
-            >
+                boxShadow: '0 3px 5px 2px rgba(102, 126, 234, .3)' }}>
               Logs en Tiempo Real
             </Button>
 
-            <Button
-              variant="contained"
-              startIcon={<BarChartIcon />}
-              onClick={handleGoToDashboard}
-              sx={{
-                textTransform: 'none', borderRadius: 2, px: 3,
+            <Button variant="contained" startIcon={<BarChartIcon />}
+              onClick={() => router.push('/dashboards')}
+              sx={{ textTransform: 'none', borderRadius: 2, px: 3,
                 background: 'linear-gradient(45deg, #1565c0 30%, #1976d2 90%)',
-                boxShadow: '0 3px 5px 2px rgba(25, 118, 210, .3)',
-              }}
-            >
+                boxShadow: '0 3px 5px 2px rgba(25, 118, 210, .3)' }}>
               Ver Dashboard
             </Button>
 
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
+            <Button variant="contained" startIcon={<AddIcon />}
               onClick={() => setCreateDialogOpen(true)}
-              sx={{ textTransform: 'none', borderRadius: 2, px: 3 }}
-            >
+              sx={{ textTransform: 'none', borderRadius: 2, px: 3 }}>
               Nuevo Bot
             </Button>
           </Box>
@@ -347,71 +279,51 @@ export default function Home() {
         </Box>
       </Paper>
 
-      {/* ─── Dialog: Confirmar Detención ─── */}
+      {/* ─── Dialogs ─── */}
       <Dialog open={stopDialog.open} onClose={() => !stopDialog.stopping && setStopDialog({ open: false, bot: null, stopping: false })} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ bgcolor: '#e65100', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-          <StopIcon /> Detener Bot
+        <DialogTitle sx={{ bgcolor: '#e65100', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><StopIcon /> Detener Bot</Box>
         </DialogTitle>
         <DialogContent sx={{ pt: 3 }}>
           <DialogContentText>
-            ¿Estás seguro que deseas detener el bot <strong>"{stopDialog.bot?.name}"</strong>?
-            <br /><br />
-            El bot finalizará al completar su iteración actual. Los datos ya scrapeados se conservarán.
+            ¿Detener el bot <strong>"{stopDialog.bot?.name}"</strong>?
+            Finalizará al completar su iteración actual.
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setStopDialog({ open: false, bot: null, stopping: false })} disabled={stopDialog.stopping} color="inherit">
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={handleStopConfirm}
-            disabled={stopDialog.stopping}
-            startIcon={stopDialog.stopping ? <CircularProgress size={18} color="inherit" /> : <StopIcon />}
-          >
+          <Button onClick={() => setStopDialog({ open: false, bot: null, stopping: false })} disabled={stopDialog.stopping} color="inherit">Cancelar</Button>
+          <Button variant="contained" color="warning" onClick={handleStopConfirm} disabled={stopDialog.stopping}
+            startIcon={stopDialog.stopping ? <CircularProgress size={18} color="inherit" /> : <StopIcon />}>
             {stopDialog.stopping ? 'Deteniendo...' : 'Sí, detener'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* ─── Dialog: Confirmar Eliminación ─── */}
       <Dialog open={deleteDialog.open} onClose={() => !deleteDialog.deleting && setDeleteDialog({ open: false, bot: null, deleting: false })} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ bgcolor: '#d32f2f', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
-          <DeleteIcon /> Eliminar Bot
+        <DialogTitle sx={{ bgcolor: '#d32f2f', color: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><DeleteIcon /> Eliminar Bot</Box>
         </DialogTitle>
         <DialogContent sx={{ pt: 3 }}>
           <DialogContentText>
-            ¿Estás seguro que deseas eliminar el bot <strong>"{deleteDialog.bot?.name}"</strong>?
-            <br /><br />
-            Esta acción <strong>no se puede deshacer</strong>. El bot será eliminado permanentemente, pero las propiedades ya scrapeadas se conservarán en la base de datos.
+            ¿Eliminar permanentemente <strong>"{deleteDialog.bot?.name}"</strong>?
+            Las propiedades ya scrapeadas se conservan.
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setDeleteDialog({ open: false, bot: null, deleting: false })} disabled={deleteDialog.deleting} color="inherit">
-            Cancelar
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleDeleteConfirm}
-            disabled={deleteDialog.deleting}
-            startIcon={deleteDialog.deleting ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}
-          >
+          <Button onClick={() => setDeleteDialog({ open: false, bot: null, deleting: false })} disabled={deleteDialog.deleting} color="inherit">Cancelar</Button>
+          <Button variant="contained" color="error" onClick={handleDeleteConfirm} disabled={deleteDialog.deleting}
+            startIcon={deleteDialog.deleting ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}>
             {deleteDialog.deleting ? 'Eliminando...' : 'Sí, eliminar'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* ─── Dialogs existentes ─── */}
-      <BotLogDialog open={logDialogOpen} onClose={handleCloseLogDialog} autoConnect botId={selectedBotId} />
+      <BotLogDialog open={logDialogOpen} onClose={() => { setLogDialogOpen(false); setTimeout(() => setSelectedBotId(undefined), 300); }}
+        autoConnect botId={selectedBotId} />
       <CreateBotDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onBotCreated={fetchBots} />
 
       <style jsx global>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
       `}</style>
     </Box>
   );

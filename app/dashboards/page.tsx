@@ -1,15 +1,20 @@
 'use client';
+// app/dashboards/page.tsx
+// Fixes:
+// 1. Flickering: separar "staged filters" de "committed filters" + debounce
+// 2. Botón "Volver" a la página principal
+// 3. Header con info del usuario y botón logout
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import axios from 'axios';
 import {
   Box, Paper, Typography, Card, CardContent, CircularProgress,
-  Alert, Button, Chip, Divider, Select, MenuItem, FormControl,
-  InputLabel, IconButton, Tooltip as MuiTooltip,
-  ToggleButton, ToggleButtonGroup, Skeleton,
+  Alert, Button, Chip, Select, MenuItem, FormControl,
+  InputLabel, IconButton, Skeleton, Avatar, Divider,
+  ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  LineChart, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   AreaChart, Area,
@@ -26,12 +31,15 @@ import LocationCityIcon from '@mui/icons-material/LocationCity';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ClearIcon from '@mui/icons-material/Clear';
 import MapIcon from '@mui/icons-material/Map';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import LogoutIcon from '@mui/icons-material/Logout';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
+import { authHeaders } from '@/lib/auth';
 
 const API_BASE_URL = 'http://localhost:5000';
 
-// ══════════════════════════════════════════════════════════════════
-// Types
-// ══════════════════════════════════════════════════════════════════
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Locations {
   regions: string[];
@@ -40,7 +48,9 @@ interface Locations {
   propertyTypes: string[];
 }
 
-interface ActiveFilters {
+// Filtros "staged" = lo que el usuario ve en los dropdowns
+// Filtros "committed" = los que van al backend (cambian solo después de debounce)
+interface Filters {
   region: string;
   city: string;
   neighborhood: string;
@@ -63,17 +73,9 @@ interface MarketData {
   sources: Array<{ name: string; value: number }>;
 }
 
-interface Bot {
-  id: number;
-  isActive: boolean;
-  totalScraped?: number;
-}
+interface Bot { id: number; isActive: boolean; totalScraped?: number; }
 
-type UnknownRecord = Record<string, any>;
-
-// ══════════════════════════════════════════════════════════════════
-// Helpers
-// ══════════════════════════════════════════════════════════════════
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 const toArray = (v: any) => (Array.isArray(v) ? v : []);
 
@@ -86,20 +88,17 @@ const formatCLP = (value: number) => {
 
 const normalizePropertyType = (type?: string): string => {
   if (!type) return 'Otro';
-  const lower = type.toLowerCase().trim();
-  if (lower.includes('departamento') || lower.includes('depto') || lower.includes('dpto')) return 'Departamento';
-  if (lower.includes('casa') && !lower.includes('prefab')) return 'Casa';
-  if (lower.includes('prefab') || lower.includes('modular')) return 'Prefabricada';
-  if (lower.includes('terreno') || lower.includes('parcela') || lower.includes('sitio')) return 'Terreno';
-  if (lower.includes('oficina')) return 'Oficina';
-  if (lower.includes('local') || lower.includes('comercial')) return 'Local Comercial';
-  if (lower.includes('bodega') || lower.includes('galpon')) return 'Bodega';
+  const l = type.toLowerCase().trim();
+  if (l.includes('departamento') || l.includes('depto')) return 'Departamento';
+  if (l.includes('casa') && !l.includes('prefab')) return 'Casa';
+  if (l.includes('prefab') || l.includes('modular')) return 'Prefabricada';
+  if (l.includes('terreno') || l.includes('parcela')) return 'Terreno';
+  if (l.includes('oficina')) return 'Oficina';
+  if (l.includes('local') || l.includes('comercial')) return 'Local Comercial';
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
-// ══════════════════════════════════════════════════════════════════
-// Paleta
-// ══════════════════════════════════════════════════════════════════
+// ── Paleta ─────────────────────────────────────────────────────────────────────
 
 const COLORS = {
   primary: '#0f4c81', secondary: '#e8927c', accent: '#2ec4b6',
@@ -116,11 +115,15 @@ const PROPERTY_TYPE_COLORS: Record<string, string> = {
 
 const PIE_COLORS = ['#0f4c81', '#2a9d8f', '#e8927c', '#f4a261', '#264653', '#e76f51', '#8ecae6', '#adb5bd'];
 
-// ══════════════════════════════════════════════════════════════════
-// Componente principal
-// ══════════════════════════════════════════════════════════════════
+const EMPTY_FILTERS: Filters = { region: '', city: '', neighborhood: '', propertyType: '' };
+
+// ── Componente principal ───────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const router = useRouter();
+  const { user, logout } = useAuth();
+
+  // ── Estado ──────────────────────────────────────────────────────
   const [bots, setBots] = useState<Bot[]>([]);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [trendsData, setTrendsData] = useState<any[]>([]);
@@ -129,117 +132,119 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null);
   const [priceFilter, setPriceFilter] = useState<'auto' | 'CLP' | 'UF'>('auto');
 
-  // Opciones disponibles para los filtros (cargadas una sola vez)
-  const [locations, setLocations] = useState<Locations>({ regions: [], cities: [], neighborhoods: [], propertyTypes: [] });
+  // Opciones de filtros (solo se cargan una vez)
+  const [locations, setLocations] = useState<Locations>({
+    regions: [], cities: [], neighborhoods: [], propertyTypes: [],
+  });
 
-  // Filtros activos
-  const [filters, setFilters] = useState<ActiveFilters>({ region: '', city: '', neighborhood: '', propertyType: '' });
-
-  // Ciudades / comunas filtradas por la región seleccionada
+  // ── FIX FLICKERING ──────────────────────────────────────────────
+  // "staged" = lo que se muestra en los dropdowns (cambia inmediatamente)
+  // "committed" = lo que se envía al backend (cambia con debounce de 400ms)
+  const [staged, setStaged] = useState<Filters>(EMPTY_FILTERS);
+  const [committed, setCommitted] = useState<Filters>(EMPTY_FILTERS);
   const [filteredCities, setFilteredCities] = useState<string[]>([]);
   const [filteredNeighborhoods, setFilteredNeighborhoods] = useState<string[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Cargar opciones de filtros (solo una vez) ──────────────────
+  // Cuando cambia el staged, programar actualización del committed con debounce
   useEffect(() => {
-    const loadLocations = async () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setCommitted(staged);
+    }, 400);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [staged]);
+
+  // Cascada de dropdowns (no afecta al dashboard directamente)
+  useEffect(() => {
+    if (!staged.region) {
+      setFilteredCities(locations.cities);
+      setFilteredNeighborhoods(locations.neighborhoods);
+      return;
+    }
+    const load = async () => {
       try {
-        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`);
+        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
+          params: { region: staged.region },
+          headers: authHeaders(),
+        });
+        setFilteredCities(data.cities);
+        setFilteredNeighborhoods(data.neighborhoods);
+      } catch { /* fallback */ }
+    };
+    load();
+    // Resetear dependientes solo en staged (NO en committed → no re-fetch)
+    setStaged((prev) => ({ ...prev, city: '', neighborhood: '' }));
+  }, [staged.region]);
+
+  useEffect(() => {
+    if (!staged.city) {
+      setFilteredNeighborhoods(locations.neighborhoods);
+      return;
+    }
+    const load = async () => {
+      try {
+        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
+          params: { region: staged.region || undefined, city: staged.city },
+          headers: authHeaders(),
+        });
+        setFilteredNeighborhoods(data.neighborhoods);
+      } catch { /* fallback */ }
+    };
+    load();
+    setStaged((prev) => ({ ...prev, neighborhood: '' }));
+  }, [staged.city]);
+
+  // ── Carga de opciones de filtros ─────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
+          headers: authHeaders(),
+        });
         setLocations(data);
         setFilteredCities(data.cities);
         setFilteredNeighborhoods(data.neighborhoods);
-      } catch (e) {
-        console.error('Error loading locations', e);
-      } finally {
-        setFiltersLoading(false);
-      }
+      } catch { /* ignore */ }
+      finally { setFiltersLoading(false); }
     };
-    loadLocations();
+    load();
   }, []);
 
-  // ── Cuando cambia la región, recalcular ciudades disponibles ──
-  // (sin llamada extra al backend: ya tenemos todas las opciones)
-  useEffect(() => {
-    if (!filters.region) {
-      setFilteredCities(locations.cities);
-      setFilteredNeighborhoods(locations.neighborhoods);
-    } else {
-      // Solo hacemos una llamada liviana para obtener ciudades de esa región
-      const fetchCitiesForRegion = async () => {
-        try {
-          const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
-            params: { region: filters.region },
-          });
-          setFilteredCities(data.cities);
-          setFilteredNeighborhoods(data.neighborhoods);
-        } catch { /* fallback */ }
-      };
-      fetchCitiesForRegion();
-      // Reset dependientes
-      setFilters((prev) => ({ ...prev, city: '', neighborhood: '' }));
-    }
-  }, [filters.region]);
-
-  useEffect(() => {
-    if (!filters.city) {
-      setFilteredNeighborhoods(locations.neighborhoods);
-    } else {
-      const fetchNeighborhoodsForCity = async () => {
-        try {
-          const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
-            params: { region: filters.region || undefined, city: filters.city },
-          });
-          setFilteredNeighborhoods(data.neighborhoods);
-        } catch { /* fallback */ }
-      };
-      fetchNeighborhoodsForCity();
-      setFilters((prev) => ({ ...prev, neighborhood: '' }));
-    }
-  }, [filters.city]);
-
-  // ── Cargar datos del dashboard (se re-ejecuta cuando cambian filtros) ──
+  // ── Carga de datos del dashboard (solo cuando cambia committed) ──
   const fetchDashboardData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     const params: Record<string, string> = {};
-    if (filters.region)       params.region = filters.region;
-    if (filters.city)         params.city = filters.city;
-    if (filters.neighborhood) params.neighborhood = filters.neighborhood;
-    if (filters.propertyType) params.propertyType = filters.propertyType;
+    if (committed.region)       params.region = committed.region;
+    if (committed.city)         params.city = committed.city;
+    if (committed.neighborhood) params.neighborhood = committed.neighborhood;
+    if (committed.propertyType) params.propertyType = committed.propertyType;
+
+    const headers = authHeaders();
 
     try {
       const results = await Promise.allSettled([
-        axios.get(`${API_BASE_URL}/api/bots`),
-        axios.get(`${API_BASE_URL}/api/analytics/market`, { params }),
-        axios.get(`${API_BASE_URL}/api/analytics/trends`, { params }),
+        axios.get(`${API_BASE_URL}/api/bots`, { headers }),
+        axios.get(`${API_BASE_URL}/api/analytics/market`, { params, headers }),
+        axios.get(`${API_BASE_URL}/api/analytics/trends`, { params, headers }),
       ]);
 
       const [botsResult, marketResult, trendsResult] = results;
-
       setBots(botsResult.status === 'fulfilled' ? toArray(botsResult.value.data) : []);
-
-      if (marketResult.status === 'fulfilled') {
-        setMarketData(marketResult.value.data || null);
-      } else {
-        setMarketData(null);
-      }
-
+      if (marketResult.status === 'fulfilled') setMarketData(marketResult.value.data || null);
       if (trendsResult.status === 'fulfilled') {
         const d = trendsResult.value.data;
         setTrendsData(toArray(d?.items || d?.data || d?.trends || d));
-      } else {
-        setTrendsData([]);
       }
-
-      if (results.some((r) => r.status === 'rejected')) {
-        setError('Algunos datos no se pudieron cargar.');
-      }
-    } catch (err) {
+      if (results.some((r) => r.status === 'rejected')) setError('Algunos datos no se pudieron cargar.');
+    } catch {
       setError('No se pudo cargar la data del dashboard.');
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [committed]); // ← Solo depende de committed, no de staged
 
   useEffect(() => {
     fetchDashboardData();
@@ -247,22 +252,18 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchDashboardData]);
 
-  // ── Helpers de filtros ─────────────────────────────────────────
+  // ── Helpers de filtros ────────────────────────────────────────────
+  const activeFilterCount = Object.values(staged).filter(Boolean).length;
+  const clearFilters = () => { setStaged(EMPTY_FILTERS); setCommitted(EMPTY_FILTERS); };
 
-  const activeFilterCount = Object.values(filters).filter(Boolean).length;
-
-  const clearFilters = () => setFilters({ region: '', city: '', neighborhood: '', propertyType: '' });
-
-  // ── Datos computados ───────────────────────────────────────────
-
-  const propertyTypeStats = useMemo(() => {
-    if (!marketData?.byType) return [];
-    return marketData.byType.map((t) => ({
+  // ── Datos derivados ───────────────────────────────────────────────
+  const propertyTypeStats = useMemo(() =>
+    (marketData?.byType ?? []).map((t) => ({
       ...t,
       type: normalizePropertyType(t.type),
       color: PROPERTY_TYPE_COLORS[normalizePropertyType(t.type)] || '#adb5bd',
-    })).sort((a, b) => b.count - a.count);
-  }, [marketData]);
+    })).sort((a, b) => b.count - a.count),
+    [marketData]);
 
   const globalAverages = useMemo(() => ({
     avgBedrooms: marketData?.globalAverages?.avgBedrooms ?? 0,
@@ -275,76 +276,56 @@ export default function Dashboard() {
     if (!marketData) return { currency: 'UF', data: [] };
     const uf = toArray(marketData.priceDistribution?.uf);
     const clp = toArray(marketData.priceDistribution?.clp);
-
     if (priceFilter === 'CLP') return { currency: 'CLP', data: clp };
     if (priceFilter === 'UF') return { currency: 'UF', data: uf };
-    // auto: usar la que tenga más datos
-    return uf.length >= clp.length
-      ? { currency: 'UF', data: uf }
-      : { currency: 'CLP', data: clp };
+    return uf.length >= clp.length ? { currency: 'UF', data: uf } : { currency: 'CLP', data: clp };
   }, [marketData, priceFilter]);
 
-  const topNeighborhoods = useMemo(() =>
-    toArray(marketData?.topNeighborhoods).slice(0, 10),
-    [marketData]
-  );
-
-  const propertySourceData = useMemo(() =>
-    toArray(marketData?.sources).filter((s) => s.value > 0),
-    [marketData]
-  );
-
+  const topNeighborhoods = useMemo(() => toArray(marketData?.topNeighborhoods).slice(0, 10), [marketData]);
+  const propertySourceData = useMemo(() => toArray(marketData?.sources).filter((s) => s.value > 0), [marketData]);
   const botStatusData = useMemo(() => [
     { name: 'Activos', value: bots.filter((b) => b.isActive).length },
     { name: 'Inactivos', value: bots.filter((b) => !b.isActive).length },
   ], [bots]);
-
   const executionData = useMemo(() =>
     trendsData.map((item: any) => ({
-      mes: item.mes || item.month || item.label || '?',
-      exitosas: item.exitosas ?? item.success ?? 0,
-      fallidas: item.fallidas ?? item.failed ?? 0,
-    })),
-    [trendsData]
-  );
+      mes: item.mes || item.month || '?',
+      exitosas: item.exitosas ?? 0,
+      fallidas: item.fallidas ?? 0,
+    })), [trendsData]);
+
+  const radarTypes = useMemo(() =>
+    propertyTypeStats.filter((t) => ['Departamento', 'Casa', 'Prefabricada'].includes(t.type)),
+    [propertyTypeStats]);
 
   const radarData = useMemo(() => {
-    const mainTypes = propertyTypeStats.filter((t) =>
-      ['Departamento', 'Casa', 'Prefabricada'].includes(t.type)
-    );
-    if (mainTypes.length === 0) return [];
-
-    const maxBedrooms = Math.max(...mainTypes.map((t) => t.avgBedrooms ?? 0), 1);
-    const maxBathrooms = Math.max(...mainTypes.map((t) => t.avgBathrooms ?? 0), 1);
-    const maxArea = Math.max(...mainTypes.map((t) => t.avgArea ?? 0), 1);
-    const maxPrice = Math.max(...mainTypes.map((t) => t.avgPrice ?? 0), 1);
-    const maxCount = Math.max(...mainTypes.map((t) => t.count), 1);
+    if (radarTypes.length === 0) return [];
+    const maxBedrooms  = Math.max(...radarTypes.map((t) => t.avgBedrooms ?? 0), 1);
+    const maxBathrooms = Math.max(...radarTypes.map((t) => t.avgBathrooms ?? 0), 1);
+    const maxArea      = Math.max(...radarTypes.map((t) => t.avgArea ?? 0), 1);
+    const maxPrice     = Math.max(...radarTypes.map((t) => t.avgPrice ?? 0), 1);
+    const maxCount     = Math.max(...radarTypes.map((t) => t.count), 1);
 
     return [
-      { metric: 'Dormitorios', key: 'avgBedrooms', max: maxBedrooms, unit: '' },
-      { metric: 'Baños', key: 'avgBathrooms', max: maxBathrooms, unit: '' },
-      { metric: 'Superficie', key: 'avgArea', max: maxArea, unit: ' m²' },
-      { metric: 'Precio', key: 'avgPrice', max: maxPrice, unit: '' },
-      { metric: 'Cantidad', key: 'count', max: maxCount, unit: '' },
+      { metric: 'Dormitorios', key: 'avgBedrooms', max: maxBedrooms },
+      { metric: 'Baños',       key: 'avgBathrooms', max: maxBathrooms },
+      { metric: 'Superficie',  key: 'avgArea', max: maxArea },
+      { metric: 'Precio',      key: 'avgPrice', max: maxPrice },
+      { metric: 'Cantidad',    key: 'count', max: maxCount },
     ].map((m) => {
-      const row: any = { metric: m.metric, unit: m.unit };
-      mainTypes.forEach((t) => {
+      const row: any = { metric: m.metric };
+      radarTypes.forEach((t) => {
         const val = (t as any)[m.key] ?? 0;
         row[t.type] = Math.round((val / m.max) * 100);
         row[`${t.type}_real`] = m.key === 'avgPrice' ? formatCLP(val) : val;
       });
       return row;
     });
-  }, [propertyTypeStats]);
-
-  const radarTypes = useMemo(() =>
-    propertyTypeStats.filter((t) => ['Departamento', 'Casa', 'Prefabricada'].includes(t.type)),
-    [propertyTypeStats]
-  );
+  }, [radarTypes]);
 
   const totalProperties = marketData?.totalProperties ?? 0;
 
-  // ── Sub-componentes ────────────────────────────────────────────
+  // ── Sub-componentes ───────────────────────────────────────────────
 
   const StatCard = ({ title, value, icon, color, subtitle }: {
     title: string; value: string | number; icon: React.ReactNode; color: string; subtitle?: string;
@@ -379,53 +360,92 @@ export default function Dashboard() {
   const SectionHeader = ({ title, icon }: { title: string; icon?: React.ReactNode }) => (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2.5 }}>
       {icon && <Box sx={{ color: COLORS.primary, display: 'flex' }}>{icon}</Box>}
-      <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText, letterSpacing: '-0.3px' }}>
-        {title}
-      </Typography>
+      <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText, letterSpacing: '-0.3px' }}>{title}</Typography>
     </Box>
   );
 
-  const ChartPaper = ({ children, sx: sx2 }: { children: React.ReactNode; sx?: any }) => (
-    <Paper elevation={0} sx={{
-      p: 3, borderRadius: 3, border: '1px solid #e9ecef',
-      background: COLORS.cardBg, ...sx2,
-    }}>
+  const ChartPaper = ({ children, sx: sxProp }: { children: React.ReactNode; sx?: object }) => (
+    <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e9ecef', background: COLORS.cardBg, ...sxProp }}>
       {children}
     </Paper>
   );
 
   const EmptyState = ({ message }: { message: string }) => (
-    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, color: COLORS.mutedText }}>
-      <Typography variant="body1" sx={{ fontWeight: 500, mb: 0.5 }}>Sin datos</Typography>
-      <Typography variant="body2" sx={{ opacity: 0.7 }}>{message}</Typography>
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 6, color: COLORS.mutedText }}>
+      <Typography variant="body2">{message}</Typography>
     </Box>
   );
 
-  // ── Render ──────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
 
       {/* ─── Header ─── */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px' }}>
-            Dashboard Inmobiliario
-          </Typography>
-          <Typography variant="body2" sx={{ color: COLORS.mutedText, mt: 0.5 }}>
-            {loading ? 'Cargando...' : `${totalProperties.toLocaleString('es-CL')} propiedades`}
-            {activeFilterCount > 0 && ` · ${activeFilterCount} filtro${activeFilterCount > 1 ? 's' : ''} activo${activeFilterCount > 1 ? 's' : ''}`}
-          </Typography>
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+
+          {/* ✅ BOTÓN VOLVER */}
+          <Button
+            variant="outlined"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => router.push('/')}
+            sx={{
+              textTransform: 'none',
+              borderRadius: 2,
+              borderColor: '#ddd',
+              color: COLORS.mutedText,
+              '&:hover': { borderColor: COLORS.primary, color: COLORS.primary },
+            }}
+          >
+            Volver
+          </Button>
+
+          <Box>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px' }}>
+              Dashboard Inmobiliario
+            </Typography>
+            <Typography variant="body2" sx={{ color: COLORS.mutedText, mt: 0.5 }}>
+              {loading ? 'Cargando...' : `${totalProperties.toLocaleString('es-CL')} propiedades`}
+              {activeFilterCount > 0 && ` · ${activeFilterCount} filtro${activeFilterCount > 1 ? 's' : ''} activo${activeFilterCount > 1 ? 's' : ''}`}
+            </Typography>
+          </Box>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
-          onClick={fetchDashboardData}
-          disabled={loading}
-          sx={{ bgcolor: COLORS.primary, textTransform: 'none', borderRadius: 2, px: 3, '&:hover': { bgcolor: '#0a3d68' } }}
-        >
-          Actualizar
-        </Button>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {/* Info del usuario */}
+          {user && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Avatar
+                src={user.avatarUrl}
+                sx={{ width: 36, height: 36, bgcolor: COLORS.primary, fontSize: '0.85rem' }}
+              >
+                {user.name[0].toUpperCase()}
+              </Avatar>
+              <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                  {user.name}
+                </Typography>
+                <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+                  {user.email}
+                </Typography>
+              </Box>
+              <IconButton size="small" onClick={logout} title="Cerrar sesión">
+                <LogoutIcon fontSize="small" sx={{ color: COLORS.mutedText }} />
+              </IconButton>
+            </Box>
+          )}
+
+          <Button
+            variant="contained"
+            startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
+            onClick={fetchDashboardData}
+            disabled={loading}
+            sx={{ bgcolor: COLORS.primary, textTransform: 'none', borderRadius: 2, px: 3, '&:hover': { bgcolor: '#0a3d68' } }}
+          >
+            Actualizar
+          </Button>
+        </Box>
       </Box>
 
       {error && <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
@@ -438,98 +458,84 @@ export default function Dashboard() {
             Filtros de Ubicación
           </Typography>
           {activeFilterCount > 0 && (
-            <Button
-              size="small"
-              startIcon={<ClearIcon />}
-              onClick={clearFilters}
-              sx={{ textTransform: 'none', color: COLORS.mutedText }}
-            >
+            <Button size="small" startIcon={<ClearIcon />} onClick={clearFilters} sx={{ textTransform: 'none', color: COLORS.mutedText }}>
               Limpiar filtros
             </Button>
           )}
         </Box>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2 }}>
-          {/* Región */}
           <FormControl size="small" fullWidth>
             <InputLabel>Región</InputLabel>
             <Select
-              value={filters.region}
+              value={staged.region}
               label="Región"
-              onChange={(e) => setFilters((prev) => ({ ...prev, region: e.target.value }))}
+              onChange={(e) => setStaged((p) => ({ ...p, region: e.target.value }))}
               disabled={filtersLoading}
               startAdornment={<MapIcon sx={{ color: COLORS.mutedText, mr: 0.5, fontSize: 18 }} />}
             >
               <MenuItem value=""><em>Todas las regiones</em></MenuItem>
-              {locations.regions.map((r) => (
-                <MenuItem key={r} value={r}>{r}</MenuItem>
-              ))}
+              {locations.regions.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
             </Select>
           </FormControl>
 
-          {/* Ciudad */}
           <FormControl size="small" fullWidth>
             <InputLabel>Ciudad</InputLabel>
             <Select
-              value={filters.city}
+              value={staged.city}
               label="Ciudad"
-              onChange={(e) => setFilters((prev) => ({ ...prev, city: e.target.value }))}
+              onChange={(e) => setStaged((p) => ({ ...p, city: e.target.value }))}
               disabled={filtersLoading || filteredCities.length === 0}
             >
               <MenuItem value=""><em>Todas las ciudades</em></MenuItem>
-              {filteredCities.map((c) => (
-                <MenuItem key={c} value={c}>{c}</MenuItem>
-              ))}
+              {filteredCities.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
             </Select>
           </FormControl>
 
-          {/* Comuna / Barrio */}
           <FormControl size="small" fullWidth>
             <InputLabel>Comuna / Barrio</InputLabel>
             <Select
-              value={filters.neighborhood}
+              value={staged.neighborhood}
               label="Comuna / Barrio"
-              onChange={(e) => setFilters((prev) => ({ ...prev, neighborhood: e.target.value }))}
+              onChange={(e) => setStaged((p) => ({ ...p, neighborhood: e.target.value }))}
               disabled={filtersLoading || filteredNeighborhoods.length === 0}
             >
               <MenuItem value=""><em>Todas las comunas</em></MenuItem>
-              {filteredNeighborhoods.map((n) => (
-                <MenuItem key={n} value={n}>{n}</MenuItem>
-              ))}
+              {filteredNeighborhoods.map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
             </Select>
           </FormControl>
 
-          {/* Tipo de propiedad */}
           <FormControl size="small" fullWidth>
             <InputLabel>Tipo de Propiedad</InputLabel>
             <Select
-              value={filters.propertyType}
+              value={staged.propertyType}
               label="Tipo de Propiedad"
-              onChange={(e) => setFilters((prev) => ({ ...prev, propertyType: e.target.value }))}
+              onChange={(e) => setStaged((p) => ({ ...p, propertyType: e.target.value }))}
               disabled={filtersLoading}
             >
               <MenuItem value=""><em>Todos los tipos</em></MenuItem>
-              {locations.propertyTypes.map((t) => (
-                <MenuItem key={t} value={t}>{normalizePropertyType(t)}</MenuItem>
-              ))}
+              {locations.propertyTypes.map((t) => <MenuItem key={t} value={t}>{normalizePropertyType(t)}</MenuItem>)}
             </Select>
           </FormControl>
         </Box>
 
-        {/* Tags de filtros activos */}
         {activeFilterCount > 0 && (
           <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-            {filters.region && (
-              <Chip size="small" label={`Región: ${filters.region}`} onDelete={() => setFilters((p) => ({ ...p, region: '' }))} color="primary" variant="outlined" />
+            {staged.region && (
+              <Chip size="small" label={`Región: ${staged.region}`}
+                onDelete={() => setStaged((p) => ({ ...p, region: '' }))} color="primary" variant="outlined" />
             )}
-            {filters.city && (
-              <Chip size="small" label={`Ciudad: ${filters.city}`} onDelete={() => setFilters((p) => ({ ...p, city: '' }))} color="primary" variant="outlined" />
+            {staged.city && (
+              <Chip size="small" label={`Ciudad: ${staged.city}`}
+                onDelete={() => setStaged((p) => ({ ...p, city: '' }))} color="primary" variant="outlined" />
             )}
-            {filters.neighborhood && (
-              <Chip size="small" label={`Comuna: ${filters.neighborhood}`} onDelete={() => setFilters((p) => ({ ...p, neighborhood: '' }))} color="primary" variant="outlined" />
+            {staged.neighborhood && (
+              <Chip size="small" label={`Comuna: ${staged.neighborhood}`}
+                onDelete={() => setStaged((p) => ({ ...p, neighborhood: '' }))} color="primary" variant="outlined" />
             )}
-            {filters.propertyType && (
-              <Chip size="small" label={`Tipo: ${normalizePropertyType(filters.propertyType)}`} onDelete={() => setFilters((p) => ({ ...p, propertyType: '' }))} color="primary" variant="outlined" />
+            {staged.propertyType && (
+              <Chip size="small" label={`Tipo: ${normalizePropertyType(staged.propertyType)}`}
+                onDelete={() => setStaged((p) => ({ ...p, propertyType: '' }))} color="primary" variant="outlined" />
             )}
           </Box>
         )}
@@ -545,7 +551,7 @@ export default function Dashboard() {
         <StatCard title="Tipos Detectados" value={propertyTypeStats.length} icon={<ApartmentIcon />} color={COLORS.warning} subtitle={propertyTypeStats.slice(0, 2).map((t) => t.type).join(', ')} />
       </Box>
 
-      {/* ─── Fila 1: Distribución por tipo + Radar ─── */}
+      {/* ─── Distribución por tipo + Radar ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <ChartPaper>
           <SectionHeader title="Distribución por Tipo" icon={<ApartmentIcon />} />
@@ -555,7 +561,8 @@ export default function Dashboard() {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <ResponsiveContainer width="55%" height={280}>
                 <PieChart>
-                  <Pie data={propertyTypeStats} dataKey="count" nameKey="type" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}
+                  <Pie data={propertyTypeStats} dataKey="count" nameKey="type" cx="50%" cy="50%"
+                    outerRadius={100} innerRadius={50} paddingAngle={2}
                     label={({ percent }) => `${(percent * 100).toFixed(0)}%`} labelLine={false}>
                     {propertyTypeStats.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
@@ -567,7 +574,7 @@ export default function Dashboard() {
                   <Box key={t.type} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
                     <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: t.color, flexShrink: 0 }} />
                     <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.85rem', color: COLORS.darkText }}>{t.type}</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>{t.type}</Typography>
                       <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
                         {t.count} ({totalProperties > 0 ? ((t.count / totalProperties) * 100).toFixed(0) : 0}%)
                       </Typography>
@@ -582,7 +589,7 @@ export default function Dashboard() {
         <ChartPaper>
           <SectionHeader title="Comparativa: Depto vs Casa vs Prefabricada" icon={<LocationCityIcon />} />
           {loading ? <Skeleton variant="rectangular" height={280} /> : radarData.length === 0 ? (
-            <EmptyState message="Se necesitan datos de departamentos, casas o prefabricadas" />
+            <EmptyState message="Se necesitan datos de varios tipos de propiedad" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
@@ -590,41 +597,25 @@ export default function Dashboard() {
                 <PolarAngleAxis dataKey="metric" tick={{ fontSize: 12, fill: COLORS.mutedText }} />
                 <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
                 {radarTypes.map((t) => (
-                  <Radar key={t.type} name={t.type} dataKey={t.type} stroke={t.color} fill={t.color} fillOpacity={0.15} strokeWidth={2} />
+                  <Radar key={t.type} name={t.type} dataKey={t.type}
+                    stroke={t.color} fill={t.color} fillOpacity={0.15} strokeWidth={2} />
                 ))}
                 <Legend />
-                <Tooltip content={({ active, payload, label }) => {
-                  if (!active || !payload?.length) return null;
-                  const dp = payload[0]?.payload;
-                  return (
-                    <Paper elevation={3} sx={{ p: 1.5, bgcolor: 'white', border: '1px solid #e9ecef' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>{label}</Typography>
-                      {payload.map((e: any) => (
-                        <Box key={e.name} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
-                          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: e.color }} />
-                          <Typography variant="caption" sx={{ color: COLORS.mutedText }}>{e.name}:</Typography>
-                          <Typography variant="caption" sx={{ fontWeight: 600 }}>
-                            {dp?.[`${e.name}_real`] !== undefined ? `${dp[`${e.name}_real`]}${dp.unit || ''}` : '—'}
-                          </Typography>
-                        </Box>
-                      ))}
-                    </Paper>
-                  );
-                }} />
+                <Tooltip />
               </RadarChart>
             </ResponsiveContainer>
           )}
         </ChartPaper>
       </Box>
 
-      {/* ─── Tabla comparativa por tipo ─── */}
+      {/* ─── Tabla comparativa ─── */}
       {propertyTypeStats.length > 0 && (
         <ChartPaper sx={{ mb: 3 }}>
           <SectionHeader title="Promedios por Tipo de Propiedad" icon={<BathtubIcon />} />
           <Box sx={{ overflowX: 'auto' }}>
             <Box component="table" sx={{
               width: '100%', borderCollapse: 'collapse',
-              '& th': { p: 1.5, textAlign: 'left', borderBottom: '2px solid #e9ecef', fontSize: '0.8rem', color: COLORS.mutedText, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' },
+              '& th': { p: 1.5, textAlign: 'left', borderBottom: '2px solid #e9ecef', fontSize: '0.8rem', color: COLORS.mutedText, fontWeight: 600, textTransform: 'uppercase' },
               '& td': { p: 1.5, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem' },
               '& tr:hover td': { bgcolor: '#f8f9fa' },
             }}>
@@ -666,7 +657,7 @@ export default function Dashboard() {
         </ChartPaper>
       )}
 
-      {/* ─── Fila 3: Distribución precios + Baños/Dormitorios ─── */}
+      {/* ─── Distribución precios + Baños/Dormitorios ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <ChartPaper>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -685,7 +676,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="rango" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => [`${v} propiedades`]} labelFormatter={(l) => `Rango: ${l} ${priceDistribution.currency}`} />
+                <Tooltip formatter={(v: number) => [`${v} propiedades`]} />
                 <Bar dataKey="cantidad" fill={COLORS.primary} radius={[4, 4, 0, 0]} name="Propiedades" />
               </BarChart>
             </ResponsiveContainer>
@@ -693,7 +684,7 @@ export default function Dashboard() {
         </ChartPaper>
 
         <ChartPaper>
-          <SectionHeader title="Baños y Dormitorios Promedio por Tipo" icon={<BathtubIcon />} />
+          <SectionHeader title="Baños y Dormitorios por Tipo" icon={<BathtubIcon />} />
           {loading ? <Skeleton variant="rectangular" height={280} /> : propertyTypeStats.length === 0 ? (
             <EmptyState message="Sin datos" />
           ) : (
@@ -712,7 +703,7 @@ export default function Dashboard() {
         </ChartPaper>
       </Box>
 
-      {/* ─── Fila 4: Top comunas + Ejecuciones ─── */}
+      {/* ─── Top comunas + Ejecuciones ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <ChartPaper>
           <SectionHeader title="Top Comunas / Ciudades" icon={<LocationCityIcon />} />
@@ -724,7 +715,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                <Tooltip formatter={(v: number, n: string) => [n === 'count' ? `${v} propiedades` : formatCLP(v), n]} />
+                <Tooltip />
                 <Bar dataKey="count" fill={COLORS.accent} name="Propiedades" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -761,7 +752,7 @@ export default function Dashboard() {
         </ChartPaper>
       </Box>
 
-      {/* ─── Fila 5: Fuentes + Estado bots ─── */}
+      {/* ─── Fuentes + Estado bots ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '2fr 1fr' }, gap: 3 }}>
         <ChartPaper>
           <SectionHeader title="Propiedades por Fuente" />
