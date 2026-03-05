@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // Rutas que requieren autenticación
-const PROTECTED_ROUTES = ['/', '/dashboards'];
+const PROTECTED_ROUTES = ['/botdashboard', '/dashboards'];
 // Rutas públicas (no redirigir si ya está logueado)
 const AUTH_ROUTES = ['/login', '/register'];
 
@@ -39,7 +39,7 @@ export function middleware(request: NextRequest) {
   // Si está en login/register pero YA está autenticado → inicio
   const isAuthRoute = AUTH_ROUTES.includes(pathname);
   if (isAuthRoute && isAuthenticated) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return NextResponse.redirect(new URL('/botdashboard', request.url));
   }
 
   return NextResponse.next();

@@ -1,330 +1,799 @@
 'use client';
-// app/page.tsx — agrega header con usuario/logout y pasa authHeaders a las llamadas API
+// app/page.tsx — Landing page de InmobiScrap
 
-import { Button, Box, Typography, Paper, Chip, Dialog, DialogTitle, DialogContent,
-  DialogContentText, DialogActions, CircularProgress, Avatar, IconButton } from '@mui/material';
-import { DataGrid, GridColDef } from '@mui/x-data-grid';
-import AddIcon from '@mui/icons-material/Add';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import StopIcon from '@mui/icons-material/Stop';
-import DeleteIcon from '@mui/icons-material/Delete';
-import TimelineIcon from '@mui/icons-material/Timeline';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import BarChartIcon from '@mui/icons-material/BarChart';
-import LogoutIcon from '@mui/icons-material/Logout';
-import axios from 'axios';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BotLogDialog } from '@/components/BotLogDialog';
-import { CreateBotDialog } from '@/components/CreateBotDialog';
-import { useAuth } from '@/context/AuthContext';
-import { authHeaders } from '@/lib/auth';
 
-const API_BASE_URL = 'http://localhost:5000';
+// ── Paleta ────────────────────────────────────────────────────────────────────
+const C = {
+  bg:        '#080c10',
+  surface:   '#0d1117',
+  surfaceAlt:'#111820',
+  border:    '#1e2d3d',
+  primary:   '#00d4ff',
+  secondary: '#0066cc',
+  accent:    '#00ff88',
+  text:      '#e2eaf2',
+  muted:     '#556070',
+  dim:       '#1a2535',
+};
 
-interface Bot {
-  id: number;
-  name: string;
-  source: string;
-  url: string;
-  isActive: boolean;
-  status: string;
-  totalScraped: number;
-  lastRunCount: number;
-  createdAt: string;
-  updatedAt?: string;
-  lastRun?: string;
-}
+// ── Features ──────────────────────────────────────────────────────────────────
+const FEATURES = [
+  {
+    icon: '🤖',
+    title: 'Bots de Scraping',
+    desc: 'Bots configurables que recorren portales inmobiliarios chilenos automáticamente. Soportan JavaScript dinámico vía Playwright y detección anti-bot.',
+  },
+  {
+    icon: '🧠',
+    title: 'Procesamiento LLM',
+    desc: 'Claude 4.6 Sonnet via AWS Bedrock extrae y estructura datos no normalizados: precios, ubicaciones, características y tipos de propiedad.',
+  },
+  {
+    icon: '📊',
+    title: 'Dashboard Analítico',
+    desc: 'Visualizaciones en tiempo real de distribución por tipo, precios promedio, comunas top, tendencias mensuales y comparativas de mercado.',
+  },
+  {
+    icon: '⚡',
+    title: 'Logs en Tiempo Real',
+    desc: 'Sistema SignalR que transmite el progreso de cada bot en vivo: fases de scraping, propiedades procesadas, errores y métricas de ejecución.',
+  },
+  {
+    icon: '🗓️',
+    title: 'Programación Cron',
+    desc: 'Cada bot puede configurarse con expresiones cron independientes. Ejecuciones automáticas sin intervención manual.',
+  },
+  {
+    icon: '🔐',
+    title: 'Autenticación JWT',
+    desc: 'Sistema completo con registro, login por email y OAuth Google. Tokens seguros con expiración configurable.',
+  },
+];
 
-export default function Home() {
-  const [dataBots, setDataBots] = useState<Bot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [logDialogOpen, setLogDialogOpen] = useState(false);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [selectedBotId, setSelectedBotId] = useState<number | undefined>(undefined);
+const SOURCES = [
+  'Portal Inmobiliario', 'Yapo', 'TocToc', 'Mercado Libre', 'GoPlaceIt', 'iCasas',
+];
 
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; bot: Bot | null; deleting: boolean }>({
-    open: false, bot: null, deleting: false,
-  });
-  const [stopDialog, setStopDialog] = useState<{ open: boolean; bot: Bot | null; stopping: boolean }>({
-    open: false, bot: null, stopping: false,
-  });
+const STACK = [
+  { label: '.NET 9',       color: '#512BD4' },
+  { label: 'Next.js 15',   color: '#ffffff' },
+  { label: 'PostgreSQL',   color: '#336791' },
+  { label: 'AWS Bedrock',  color: '#FF9900' },
+  { label: 'Playwright',   color: '#45ba4b' },
+  { label: 'Hangfire',     color: '#e85d3c' },
+  { label: 'SignalR',      color: '#00d4ff' },
+  { label: 'Claude 4.6',   color: '#cc9b7a' },
+];
 
-  const router = useRouter();
-  const { user, logout } = useAuth();
+// ── Animación de terminal ─────────────────────────────────────────────────────
+const TERMINAL_LINES = [
+  { delay: 0,    text: '$ inmobiscrap start --all-bots',          color: C.accent },
+  { delay: 600,  text: '🚀 Bot "Portal Inmobiliario RM" iniciado', color: C.text   },
+  { delay: 1200, text: '🌐 Descargando HTML... 284,392 chars',     color: C.muted  },
+  { delay: 1800, text: '🤖 Enviando a AWS Bedrock (Claude 4.6)…',  color: C.text   },
+  { delay: 2400, text: '✅ 24 propiedades extraídas en chunk 1/2',  color: C.accent },
+  { delay: 3000, text: '✅ 18 propiedades extraídas en chunk 2/2',  color: C.accent },
+  { delay: 3600, text: '💾 42 nuevas propiedades guardadas',        color: C.primary},
+  { delay: 4200, text: '🎉 Bot completado. Total acumulado: 1,847', color: C.primary},
+];
 
-  const fetchBots = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/api/bots`, { headers: authHeaders() });
-      setDataBots(response.data);
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        logout();
-      }
-      console.error('Error fetching bots:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [logout]);
+// ── Componentes ───────────────────────────────────────────────────────────────
+
+function Terminal() {
+  const [visibleLines, setVisibleLines] = useState<number[]>([]);
 
   useEffect(() => {
-    fetchBots();
-    const interval = setInterval(fetchBots, 15000);
-    return () => clearInterval(interval);
-  }, [fetchBots]);
-
-  const handleViewLogs = (botId: number) => {
-    setSelectedBotId(botId);
-    setLogDialogOpen(true);
-  };
-
-  const handleRunBot = async (botId: number) => {
-    try {
-      await axios.post(`${API_BASE_URL}/api/bots/${botId}/run`, {}, { headers: authHeaders() });
-      fetchBots();
-      setSelectedBotId(botId);
-      setLogDialogOpen(true);
-    } catch (error: any) {
-      alert(error.response?.data?.message || 'Error al ejecutar el bot');
-    }
-  };
-
-  const handleStopConfirm = async () => {
-    if (!stopDialog.bot) return;
-    setStopDialog((prev) => ({ ...prev, stopping: true }));
-    try {
-      await axios.post(`${API_BASE_URL}/api/bots/${stopDialog.bot.id}/stop`, {}, { headers: authHeaders() });
-      fetchBots();
-    } catch (error: any) {
-      alert(error.response?.data?.message || 'Error al detener el bot');
-    } finally {
-      setStopDialog({ open: false, bot: null, stopping: false });
-    }
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteDialog.bot) return;
-    setDeleteDialog((prev) => ({ ...prev, deleting: true }));
-    try {
-      await axios.delete(`${API_BASE_URL}/api/bots/${deleteDialog.bot.id}`, { headers: authHeaders() });
-      fetchBots();
-    } catch (error: any) {
-      alert(error.response?.data?.message || 'Error al eliminar el bot');
-    } finally {
-      setDeleteDialog({ open: false, bot: null, deleting: false });
-    }
-  };
-
-  const STATUS_CONFIG: Record<string, { color: 'default' | 'info' | 'success' | 'error' | 'warning'; label: string }> = {
-    idle:      { color: 'default',  label: 'Inactivo' },
-    running:   { color: 'info',     label: 'Ejecutando' },
-    stopping:  { color: 'warning',  label: 'Deteniendo...' },
-    completed: { color: 'success',  label: 'Completado' },
-    error:     { color: 'error',    label: 'Error' },
-  };
-
-  const columns: GridColDef[] = [
-    { field: 'id', headerName: 'ID', width: 65, headerAlign: 'center', align: 'center' },
-    { field: 'name', headerName: 'Nombre', width: 220, flex: 1 },
-    {
-      field: 'source', headerName: 'Fuente', width: 140,
-      renderCell: (params) => <Chip label={params.value || 'N/A'} size="small" variant="outlined" color="primary" />,
-    },
-    {
-      field: 'isActive', headerName: 'Activo', width: 100,
-      renderCell: (params) => <Chip label={params.value ? 'Sí' : 'No'} color={params.value ? 'success' : 'default'} size="small" />,
-    },
-    {
-      field: 'status', headerName: 'Estado', width: 130,
-      renderCell: (params) => {
-        const cfg = STATUS_CONFIG[params.value] ?? { color: 'default', label: params.value || 'idle' };
-        return (
-          <Chip label={cfg.label} color={cfg.color} size="small" variant="outlined"
-            sx={params.value === 'running' ? { animation: 'pulse 1.5s infinite' } : {}} />
-        );
-      },
-    },
-    {
-      field: 'totalScraped', headerName: 'Total', width: 90, headerAlign: 'center', align: 'center',
-      renderCell: (params) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{(params.value || 0).toLocaleString('es-CL')}</Typography>,
-    },
-    {
-      field: 'lastRunCount', headerName: 'Último run', width: 100, headerAlign: 'center', align: 'center',
-      renderCell: (params) => <Typography variant="body2" sx={{ color: 'text.secondary' }}>{params.value || 0}</Typography>,
-    },
-    {
-      field: 'url', headerName: 'URL', width: 200, flex: 1,
-      renderCell: (params) => (
-        <Typography variant="body2" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.secondary' }} title={params.value}>
-          {params.value}
-        </Typography>
-      ),
-    },
-    {
-      field: 'createdAt', headerName: 'Creado', width: 150,
-      valueFormatter: (value) => value ? new Date(value).toLocaleString('es-CL') : '—',
-    },
-    {
-      field: 'actions', headerName: 'Acciones', width: 290, headerAlign: 'center', align: 'center', sortable: false,
-      renderCell: (params) => {
-        const bot: Bot = params.row;
-        const isRunning  = bot.status === 'running';
-        const isStopping = bot.status === 'stopping';
-        return (
-          <Box sx={{ display: 'flex', gap: 0.75 }}>
-            <Button variant="outlined" size="small" startIcon={<VisibilityIcon />}
-              onClick={() => handleViewLogs(bot.id)} sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}>
-              Logs
-            </Button>
-            {!isRunning && !isStopping && (
-              <Button variant="contained" size="small" startIcon={<PlayArrowIcon />}
-                onClick={() => handleRunBot(bot.id)} disabled={!bot.isActive}
-                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#1565c0' }}>
-                Ejecutar
-              </Button>
-            )}
-            {(isRunning || isStopping) && (
-              <Button variant="contained" size="small"
-                startIcon={isStopping ? <CircularProgress size={14} color="inherit" /> : <StopIcon />}
-                onClick={() => setStopDialog({ open: true, bot, stopping: false })} disabled={isStopping}
-                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#e65100' }}>
-                {isStopping ? 'Deteniendo' : 'Detener'}
-              </Button>
-            )}
-            <Button variant="outlined" size="small" color="error" startIcon={<DeleteIcon />}
-              onClick={() => setDeleteDialog({ open: true, bot, deleting: false })} disabled={isRunning || isStopping}
-              sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}>
-              Eliminar
-            </Button>
-          </Box>
-        );
-      },
-    },
-  ];
+    const timers = TERMINAL_LINES.map((line, i) =>
+      setTimeout(() => setVisibleLines((prev) => [...prev, i]), line.delay + 800)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, []);
 
   return (
-    <Box sx={{ padding: 4, backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
-      <Paper elevation={3} sx={{ padding: 3, borderRadius: 2 }}>
-
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
-          <Box>
-            <Typography variant="h4" component="h1" sx={{ fontWeight: 600, color: '#1976d2', mb: 0.5 }}>
-              Gestión de Bots
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Administra, ejecuta y monitorea tus bots de scraping
-            </Typography>
-          </Box>
-
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Info usuario */}
-            {user && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1, bgcolor: '#f0f4ff', borderRadius: 2 }}>
-                <Avatar src={user.avatarUrl} sx={{ width: 32, height: 32, bgcolor: '#1976d2', fontSize: '0.8rem' }}>
-                  {user.name[0].toUpperCase()}
-                </Avatar>
-                <Box sx={{ display: { xs: 'none', sm: 'block' } }}>
-                  <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>{user.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">{user.role}</Typography>
-                </Box>
-                <IconButton size="small" onClick={logout} title="Cerrar sesión">
-                  <LogoutIcon fontSize="small" />
-                </IconButton>
-              </Box>
-            )}
-
-            <Button variant="contained" color="secondary" startIcon={<TimelineIcon />}
-              onClick={() => { setSelectedBotId(undefined); setLogDialogOpen(true); }}
-              sx={{ textTransform: 'none', borderRadius: 2, px: 3,
-                background: 'linear-gradient(45deg, #667eea 30%, #764ba2 90%)',
-                boxShadow: '0 3px 5px 2px rgba(102, 126, 234, .3)' }}>
-              Logs en Tiempo Real
-            </Button>
-
-            <Button variant="contained" startIcon={<BarChartIcon />}
-              onClick={() => router.push('/dashboards')}
-              sx={{ textTransform: 'none', borderRadius: 2, px: 3,
-                background: 'linear-gradient(45deg, #1565c0 30%, #1976d2 90%)',
-                boxShadow: '0 3px 5px 2px rgba(25, 118, 210, .3)' }}>
-              Ver Dashboard
-            </Button>
-
-            <Button variant="contained" startIcon={<AddIcon />}
-              onClick={() => setCreateDialogOpen(true)}
-              sx={{ textTransform: 'none', borderRadius: 2, px: 3 }}>
-              Nuevo Bot
-            </Button>
-          </Box>
-        </Box>
-
-        {/* DataGrid */}
-        <Box sx={{ height: 600, width: '100%' }}>
-          <DataGrid
-            rows={dataBots}
-            columns={columns}
-            loading={loading}
-            pageSizeOptions={[10, 25, 50]}
-            initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
-            checkboxSelection
-            disableRowSelectionOnClick
-            sx={{
-              border: 'none',
-              '& .MuiDataGrid-cell': { borderBottom: '1px solid #f0f0f0' },
-              '& .MuiDataGrid-columnHeaders': { backgroundColor: '#fafafa', borderBottom: '2px solid #e0e0e0', fontWeight: 600 },
-              '& .MuiDataGrid-row:hover': { backgroundColor: '#f5f5f5' },
+    <div style={s.terminal}>
+      <div style={s.terminalBar}>
+        <span style={{ ...s.dot, background: '#ff5f57' }} />
+        <span style={{ ...s.dot, background: '#ffbd2e' }} />
+        <span style={{ ...s.dot, background: '#28c840' }} />
+        <span style={s.terminalTitle}>inmobiscrap — zsh</span>
+      </div>
+      <div style={s.terminalBody}>
+        {TERMINAL_LINES.map((line, i) => (
+          <div
+            key={i}
+            style={{
+              ...s.terminalLine,
+              color: line.color,
+              opacity: visibleLines.includes(i) ? 1 : 0,
+              transform: visibleLines.includes(i) ? 'translateY(0)' : 'translateY(6px)',
+              transition: 'opacity 0.4s ease, transform 0.4s ease',
             }}
-          />
-        </Box>
-      </Paper>
-
-      {/* ─── Dialogs ─── */}
-      <Dialog open={stopDialog.open} onClose={() => !stopDialog.stopping && setStopDialog({ open: false, bot: null, stopping: false })} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ bgcolor: '#e65100', color: 'white' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><StopIcon /> Detener Bot</Box>
-        </DialogTitle>
-        <DialogContent sx={{ pt: 3 }}>
-          <DialogContentText>
-            ¿Detener el bot <strong>"{stopDialog.bot?.name}"</strong>?
-            Finalizará al completar su iteración actual.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setStopDialog({ open: false, bot: null, stopping: false })} disabled={stopDialog.stopping} color="inherit">Cancelar</Button>
-          <Button variant="contained" color="warning" onClick={handleStopConfirm} disabled={stopDialog.stopping}
-            startIcon={stopDialog.stopping ? <CircularProgress size={18} color="inherit" /> : <StopIcon />}>
-            {stopDialog.stopping ? 'Deteniendo...' : 'Sí, detener'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={deleteDialog.open} onClose={() => !deleteDialog.deleting && setDeleteDialog({ open: false, bot: null, deleting: false })} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ bgcolor: '#d32f2f', color: 'white' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><DeleteIcon /> Eliminar Bot</Box>
-        </DialogTitle>
-        <DialogContent sx={{ pt: 3 }}>
-          <DialogContentText>
-            ¿Eliminar permanentemente <strong>"{deleteDialog.bot?.name}"</strong>?
-            Las propiedades ya scrapeadas se conservan.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setDeleteDialog({ open: false, bot: null, deleting: false })} disabled={deleteDialog.deleting} color="inherit">Cancelar</Button>
-          <Button variant="contained" color="error" onClick={handleDeleteConfirm} disabled={deleteDialog.deleting}
-            startIcon={deleteDialog.deleting ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />}>
-            {deleteDialog.deleting ? 'Eliminando...' : 'Sí, eliminar'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <BotLogDialog open={logDialogOpen} onClose={() => { setLogDialogOpen(false); setTimeout(() => setSelectedBotId(undefined), 300); }}
-        autoConnect botId={selectedBotId} />
-      <CreateBotDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onBotCreated={fetchBots} />
-
-      <style jsx global>{`
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-      `}</style>
-    </Box>
+          >
+            {line.text}
+          </div>
+        ))}
+        <div style={{ ...s.terminalLine, color: C.accent, opacity: visibleLines.length === TERMINAL_LINES.length ? 1 : 0 }}>
+          <span style={s.cursor}>▌</span>
+        </div>
+      </div>
+    </div>
   );
 }
+
+function FeatureCard({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      style={{
+        ...s.featureCard,
+        borderColor: hovered ? C.primary + '55' : C.border,
+        background: hovered ? C.surfaceAlt : C.surface,
+        transform: hovered ? 'translateY(-4px)' : 'translateY(0)',
+        boxShadow: hovered ? `0 12px 40px ${C.primary}15` : 'none',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div style={s.featureIcon}>{icon}</div>
+      <div style={s.featureTitle}>{title}</div>
+      <div style={s.featureDesc}>{desc}</div>
+    </div>
+  );
+}
+
+// ── Página principal ──────────────────────────────────────────────────────────
+
+export default function LandingPage() {
+  const router = useRouter();
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setScrolled(window.scrollY > 20);
+    window.addEventListener('scroll', handler);
+    return () => window.removeEventListener('scroll', handler);
+  }, []);
+
+  return (
+    <div style={s.page}>
+
+      {/* ── Grid de fondo ── */}
+      <div style={s.bgGrid} />
+      <div style={s.bgGlow} />
+
+      {/* ── Navbar ── */}
+      <nav style={{ ...s.nav, backdropFilter: scrolled ? 'blur(16px)' : 'none', borderBottomColor: scrolled ? C.border : 'transparent' }}>
+        <div style={s.navInner}>
+          <div style={s.navLogo}>
+            <span style={s.logoIcon}>🏠</span>
+            <span style={s.logoText}>InmobiScrap</span>
+            <span style={s.logoBadge}>Beta</span>
+          </div>
+          <div style={s.navActions}>
+            <button style={s.navLink} onClick={() => router.push('/login')}>Iniciar sesión</button>
+            <button style={s.navCta} onClick={() => router.push('/register')}>Registrarse →</button>
+          </div>
+        </div>
+      </nav>
+
+      {/* ── Hero ── */}
+      <section style={s.hero}>
+        <div style={s.heroContent}>
+          <div style={s.heroBadge}>
+            <span style={s.heroBadgeDot} />
+            Powered by Claude 4.6 Sonnet · AWS Bedrock
+          </div>
+
+          <h1 style={s.heroTitle}>
+            Inteligencia artificial
+            <br />
+            <span style={s.heroTitleAccent}>para el mercado</span>
+            <br />
+            inmobiliario chileno
+          </h1>
+
+          <p style={s.heroDesc}>
+            InmobiScrap automatiza la recopilación y análisis de datos de propiedades
+            usando bots de scraping + LLMs. Convierte páginas caóticas en datos
+            estructurados, comparables y accionables.
+          </p>
+
+          <div style={s.heroCtas}>
+            <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
+              Comenzar gratis
+            </button>
+            <button style={s.ctaSecondary} onClick={() => router.push('/login')}>
+              Ya tengo cuenta →
+            </button>
+          </div>
+
+          <div style={s.heroSources}>
+            <span style={s.heroSourcesLabel}>Portales soportados:</span>
+            {SOURCES.map((src) => (
+              <span key={src} style={s.sourceChip}>{src}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Terminal animada */}
+        <div style={s.heroTerminal}>
+          <Terminal />
+        </div>
+      </section>
+
+      {/* ── Stats ── */}
+      <section style={s.statsSection}>
+        <div style={s.statsGrid}>
+          {[
+            { value: '6+',    label: 'Portales integrados'      },
+            { value: 'LLM',   label: 'Extracción inteligente'   },
+            { value: 'RT',    label: 'Logs en tiempo real'       },
+            { value: 'Cron',  label: 'Programación automática'   },
+          ].map((stat) => (
+            <div key={stat.label} style={s.statItem}>
+              <div style={s.statValue}>{stat.value}</div>
+              <div style={s.statLabel}>{stat.label}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Features ── */}
+      <section style={s.section}>
+        <div style={s.sectionHeader}>
+          <div style={s.sectionTag}>Funcionalidades</div>
+          <h2 style={s.sectionTitle}>Todo lo que necesitas para<br />analizar el mercado</h2>
+          <p style={s.sectionDesc}>
+            Una plataforma completa que va desde la extracción de datos hasta la visualización analítica.
+          </p>
+        </div>
+        <div style={s.featuresGrid}>
+          {FEATURES.map((f) => <FeatureCard key={f.title} {...f} />)}
+        </div>
+      </section>
+
+      {/* ── Stack ── */}
+      <section style={{ ...s.section, ...s.stackSection }}>
+        <div style={s.sectionHeader}>
+          <div style={s.sectionTag}>Stack tecnológico</div>
+          <h2 style={s.sectionTitle}>Construido con tecnologías<br />de producción</h2>
+        </div>
+        <div style={s.stackGrid}>
+          {STACK.map((tech) => (
+            <div key={tech.label} style={s.stackChip}>
+              <div style={{ ...s.stackDot, background: tech.color }} />
+              <span style={s.stackLabel}>{tech.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── CTA final ── */}
+      <section style={s.ctaSection}>
+        <div style={s.ctaBox}>
+          <div style={s.ctaGlow} />
+          <h2 style={s.ctaTitle}>Empieza a scrapear hoy</h2>
+          <p style={s.ctaDesc}>
+            Crea tu cuenta, configura tu primer bot y obtén datos estructurados
+            del mercado inmobiliario en minutos.
+          </p>
+          <div style={s.heroCtas}>
+            <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
+              Crear cuenta gratis
+            </button>
+            <button style={s.ctaSecondary} onClick={() => router.push('/login')}>
+              Iniciar sesión →
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer style={s.footer}>
+        <div style={s.footerInner}>
+          <div style={s.navLogo}>
+            <span style={s.logoIcon}>🏠</span>
+            <span style={{ ...s.logoText, fontSize: '14px' }}>InmobiScrap</span>
+          </div>
+          <div style={s.footerRight}>
+            <span style={{ color: C.muted, fontSize: '13px' }}>
+              Hecho con ❤️ en Chile 🇨🇱
+            </span>
+          </div>
+        </div>
+      </footer>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body { background: ${C.bg}; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
+        @keyframes glow { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Estilos ───────────────────────────────────────────────────────────────────
+const s: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: '100vh',
+    background: C.bg,
+    fontFamily: '"Syne", sans-serif',
+    color: C.text,
+    overflowX: 'hidden',
+    position: 'relative',
+  },
+  bgGrid: {
+    position: 'fixed',
+    inset: 0,
+    backgroundImage: `linear-gradient(${C.border}40 1px, transparent 1px), linear-gradient(90deg, ${C.border}40 1px, transparent 1px)`,
+    backgroundSize: '60px 60px',
+    pointerEvents: 'none',
+    zIndex: 0,
+  },
+  bgGlow: {
+    position: 'fixed',
+    top: '-20%',
+    left: '30%',
+    width: '800px',
+    height: '800px',
+    background: `radial-gradient(circle, ${C.secondary}18 0%, transparent 70%)`,
+    pointerEvents: 'none',
+    zIndex: 0,
+    animation: 'glow 6s ease-in-out infinite',
+  },
+
+  // Navbar
+  nav: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    borderBottom: '1px solid transparent',
+    transition: 'all 0.3s ease',
+    background: 'transparent',
+  },
+  navInner: {
+    maxWidth: '1200px',
+    margin: '0 auto',
+    padding: '16px 24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  navLogo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  logoIcon: { fontSize: '22px' },
+  logoText: {
+    fontFamily: '"Space Mono", monospace',
+    fontWeight: 700,
+    fontSize: '18px',
+    color: C.text,
+    letterSpacing: '-0.5px',
+  },
+  logoBadge: {
+    fontSize: '10px',
+    fontWeight: 700,
+    color: C.accent,
+    background: `${C.accent}18`,
+    border: `1px solid ${C.accent}44`,
+    borderRadius: '4px',
+    padding: '2px 6px',
+    letterSpacing: '1px',
+    textTransform: 'uppercase' as const,
+  },
+  navActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+  },
+  navLink: {
+    background: 'none',
+    border: 'none',
+    color: C.muted,
+    fontSize: '14px',
+    cursor: 'pointer',
+    fontFamily: '"Syne", sans-serif',
+    fontWeight: 600,
+    padding: '8px 16px',
+    borderRadius: '6px',
+    transition: 'color 0.2s',
+  },
+  navCta: {
+    background: `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
+    border: 'none',
+    color: '#fff',
+    fontSize: '14px',
+    fontWeight: 700,
+    fontFamily: '"Syne", sans-serif',
+    cursor: 'pointer',
+    padding: '9px 20px',
+    borderRadius: '8px',
+    transition: 'opacity 0.2s, transform 0.2s',
+  },
+
+  // Hero
+  hero: {
+    position: 'relative',
+    zIndex: 1,
+    maxWidth: '1200px',
+    margin: '0 auto',
+    padding: '140px 24px 80px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '60px',
+    flexWrap: 'wrap' as const,
+  },
+  heroContent: {
+    flex: '1 1 480px',
+    minWidth: '320px',
+  },
+  heroBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '12px',
+    fontFamily: '"Space Mono", monospace',
+    color: C.primary,
+    background: `${C.primary}12`,
+    border: `1px solid ${C.primary}33`,
+    borderRadius: '20px',
+    padding: '6px 14px',
+    marginBottom: '28px',
+    letterSpacing: '0.3px',
+  },
+  heroBadgeDot: {
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    background: C.accent,
+    animation: 'blink 2s infinite',
+    display: 'inline-block',
+  },
+  heroTitle: {
+    fontSize: 'clamp(36px, 5vw, 64px)',
+    fontWeight: 800,
+    lineHeight: 1.1,
+    color: C.text,
+    marginBottom: '24px',
+    letterSpacing: '-2px',
+  },
+  heroTitleAccent: {
+    background: `linear-gradient(135deg, ${C.primary}, ${C.accent})`,
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+  },
+  heroDesc: {
+    fontSize: '17px',
+    color: C.muted,
+    lineHeight: 1.7,
+    marginBottom: '36px',
+    maxWidth: '500px',
+  },
+  heroCtas: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    flexWrap: 'wrap' as const,
+    marginBottom: '32px',
+  },
+  ctaPrimary: {
+    background: `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
+    border: 'none',
+    color: '#fff',
+    fontSize: '15px',
+    fontWeight: 700,
+    fontFamily: '"Syne", sans-serif',
+    cursor: 'pointer',
+    padding: '14px 28px',
+    borderRadius: '10px',
+    boxShadow: `0 0 30px ${C.primary}30`,
+    transition: 'transform 0.2s, box-shadow 0.2s',
+  },
+  ctaSecondary: {
+    background: 'none',
+    border: `1px solid ${C.border}`,
+    color: C.text,
+    fontSize: '15px',
+    fontWeight: 600,
+    fontFamily: '"Syne", sans-serif',
+    cursor: 'pointer',
+    padding: '13px 24px',
+    borderRadius: '10px',
+    transition: 'border-color 0.2s, color 0.2s',
+  },
+  heroSources: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap' as const,
+  },
+  heroSourcesLabel: {
+    fontSize: '12px',
+    color: C.muted,
+    fontFamily: '"Space Mono", monospace',
+  },
+  sourceChip: {
+    fontSize: '11px',
+    fontFamily: '"Space Mono", monospace',
+    color: C.muted,
+    background: C.dim,
+    border: `1px solid ${C.border}`,
+    borderRadius: '4px',
+    padding: '3px 8px',
+  },
+  heroTerminal: {
+    flex: '1 1 420px',
+    minWidth: '320px',
+    animation: 'float 6s ease-in-out infinite',
+  },
+
+  // Terminal
+  terminal: {
+    background: '#0a0e14',
+    border: `1px solid ${C.border}`,
+    borderRadius: '12px',
+    overflow: 'hidden',
+    boxShadow: `0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px ${C.primary}20`,
+  },
+  terminalBar: {
+    background: '#111820',
+    padding: '12px 16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    borderBottom: `1px solid ${C.border}`,
+  },
+  dot: {
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    display: 'inline-block',
+  },
+  terminalTitle: {
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    fontSize: '12px',
+    color: C.muted,
+    fontFamily: '"Space Mono", monospace',
+  },
+  terminalBody: {
+    padding: '20px',
+    minHeight: '260px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '10px',
+  },
+  terminalLine: {
+    fontFamily: '"Space Mono", monospace',
+    fontSize: '13px',
+    lineHeight: 1.5,
+  },
+  cursor: {
+    animation: 'blink 1s infinite',
+    display: 'inline-block',
+    color: C.accent,
+  },
+
+  // Stats
+  statsSection: {
+    position: 'relative',
+    zIndex: 1,
+    borderTop: `1px solid ${C.border}`,
+    borderBottom: `1px solid ${C.border}`,
+    background: C.surface,
+  },
+  statsGrid: {
+    maxWidth: '1200px',
+    margin: '0 auto',
+    padding: '40px 24px',
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '0',
+  },
+  statItem: {
+    textAlign: 'center' as const,
+    padding: '20px',
+    borderRight: `1px solid ${C.border}`,
+  },
+  statValue: {
+    fontFamily: '"Space Mono", monospace',
+    fontSize: '32px',
+    fontWeight: 700,
+    color: C.primary,
+    marginBottom: '6px',
+    letterSpacing: '-1px',
+  },
+  statLabel: {
+    fontSize: '13px',
+    color: C.muted,
+    fontWeight: 600,
+  },
+
+  // Sections
+  section: {
+    position: 'relative',
+    zIndex: 1,
+    maxWidth: '1200px',
+    margin: '0 auto',
+    padding: '100px 24px',
+  },
+  sectionHeader: {
+    textAlign: 'center' as const,
+    marginBottom: '64px',
+  },
+  sectionTag: {
+    display: 'inline-block',
+    fontSize: '11px',
+    fontFamily: '"Space Mono", monospace',
+    fontWeight: 700,
+    color: C.accent,
+    letterSpacing: '2px',
+    textTransform: 'uppercase' as const,
+    marginBottom: '16px',
+    background: `${C.accent}12`,
+    border: `1px solid ${C.accent}30`,
+    borderRadius: '4px',
+    padding: '4px 12px',
+  },
+  sectionTitle: {
+    fontSize: 'clamp(28px, 4vw, 44px)',
+    fontWeight: 800,
+    color: C.text,
+    lineHeight: 1.15,
+    marginBottom: '16px',
+    letterSpacing: '-1.5px',
+  },
+  sectionDesc: {
+    fontSize: '16px',
+    color: C.muted,
+    maxWidth: '500px',
+    margin: '0 auto',
+    lineHeight: 1.7,
+  },
+
+  // Features grid
+  featuresGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '20px',
+  },
+  featureCard: {
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: '12px',
+    padding: '28px',
+    transition: 'all 0.25s ease',
+    cursor: 'default',
+  },
+  featureIcon: {
+    fontSize: '28px',
+    marginBottom: '16px',
+  },
+  featureTitle: {
+    fontSize: '17px',
+    fontWeight: 700,
+    color: C.text,
+    marginBottom: '10px',
+    letterSpacing: '-0.3px',
+  },
+  featureDesc: {
+    fontSize: '14px',
+    color: C.muted,
+    lineHeight: 1.7,
+  },
+
+  // Stack
+  stackSection: {
+    borderTop: `1px solid ${C.border}`,
+    background: C.surface,
+    maxWidth: '100%',
+    padding: '80px 24px',
+  },
+  stackGrid: {
+    maxWidth: '900px',
+    margin: '0 auto',
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    gap: '12px',
+    justifyContent: 'center',
+  },
+  stackChip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    background: C.dim,
+    border: `1px solid ${C.border}`,
+    borderRadius: '8px',
+    padding: '10px 18px',
+    transition: 'border-color 0.2s',
+  },
+  stackDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    flexShrink: 0,
+  },
+  stackLabel: {
+    fontFamily: '"Space Mono", monospace',
+    fontSize: '13px',
+    color: C.text,
+    fontWeight: 700,
+  },
+
+  // CTA final
+  ctaSection: {
+    position: 'relative',
+    zIndex: 1,
+    padding: '100px 24px',
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  ctaBox: {
+    position: 'relative',
+    maxWidth: '680px',
+    width: '100%',
+    textAlign: 'center' as const,
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: '20px',
+    padding: '64px 48px',
+    overflow: 'hidden',
+  },
+  ctaGlow: {
+    position: 'absolute',
+    top: '-50%',
+    left: '25%',
+    width: '400px',
+    height: '400px',
+    background: `radial-gradient(circle, ${C.primary}12 0%, transparent 70%)`,
+    pointerEvents: 'none',
+  },
+  ctaTitle: {
+    position: 'relative',
+    fontSize: 'clamp(28px, 4vw, 40px)',
+    fontWeight: 800,
+    color: C.text,
+    marginBottom: '16px',
+    letterSpacing: '-1.5px',
+  },
+  ctaDesc: {
+    position: 'relative',
+    fontSize: '16px',
+    color: C.muted,
+    lineHeight: 1.7,
+    marginBottom: '36px',
+  },
+
+  // Footer
+  footer: {
+    position: 'relative',
+    zIndex: 1,
+    borderTop: `1px solid ${C.border}`,
+    background: C.surface,
+  },
+  footerInner: {
+    maxWidth: '1200px',
+    margin: '0 auto',
+    padding: '24px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap' as const,
+    gap: '16px',
+  },
+  footerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+  },
+};

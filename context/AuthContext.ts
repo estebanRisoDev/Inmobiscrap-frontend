@@ -1,4 +1,3 @@
-
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode, createElement } from 'react';
@@ -68,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     removeToken();
     setUserState(null);
     document.cookie = 'inmobiscrap_token=; path=/; max-age=0';
-    window.location.href = '/login';
+    window.location.href = '/';
   }, []);
 
   const value: AuthContextValue = { user, loading, login, register, googleLogin, logout };

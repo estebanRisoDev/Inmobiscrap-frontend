@@ -52,7 +52,7 @@ export function isLoggedIn(): boolean {
 
 export function logout(): void {
   removeToken();
-  window.location.href = '/login';
+  window.location.href = '/';
 }
 
 // Headers de autorización para axios/fetch

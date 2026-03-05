@@ -248,8 +248,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 60000);
-    return () => clearInterval(interval);
   }, [fetchDashboardData]);
 
   // ── Helpers de filtros ────────────────────────────────────────────
@@ -389,7 +387,7 @@ export default function Dashboard() {
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
-            onClick={() => router.push('/')}
+            onClick={() => router.push('/botdashboard')}
             sx={{
               textTransform: 'none',
               borderRadius: 2,
