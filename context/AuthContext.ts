@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode, createElement } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode, createElement } from 'react';
 import axios from 'axios';
 import { AuthUser, getToken, setToken, setUser, getUser, removeToken, isLoggedIn } from '@/lib/auth';
 
@@ -13,6 +13,9 @@ interface AuthContextValue {
   register: (name: string, email: string, password: string) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
   logout: () => void;
+  refreshCredits: () => Promise<void>;
+  isPro: boolean;
+  isAdmin: boolean;
 }
 
 const Context = createContext<AuthContextValue | null>(null);
@@ -20,6 +23,10 @@ const Context = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const userRef = useRef<AuthUser | null>(null);
+
+  // Mantener ref sincronizado con state
+  useEffect(() => { userRef.current = user; }, [user]);
 
   useEffect(() => {
     if (isLoggedIn()) {
@@ -31,10 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .get(`${API_BASE}/api/auth/me`, {
             headers: { Authorization: `Bearer ${getToken()}` },
           })
-          .then(({ data }) => {
-            setUser(data);
-            setUserState(data);
-          })
+          .then(({ data }) => { setUser(data); setUserState(data); })
           .catch(() => removeToken());
       }
     }
@@ -70,7 +74,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = '/';
   }, []);
 
-  const value: AuthContextValue = { user, loading, login, register, googleLogin, logout };
+  const refreshCredits = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API_BASE}/api/auth/credits`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const current = userRef.current;
+      if (current) {
+        const updated = { ...current, credits: data.credits, plan: data.plan, role: data.role };
+        setUser(updated);
+        setUserState(updated);
+      }
+    } catch { /* silenciar */ }
+  }, []); // ← Sin dependencias: estable para siempre
+
+  const isPro   = user?.plan === 'pro';
+  const isAdmin = user?.role === 'admin';
+
+  const value: AuthContextValue = {
+    user, loading, login, register, googleLogin, logout,
+    refreshCredits, isPro, isAdmin,
+  };
 
   return createElement(Context.Provider, { value }, children);
 }

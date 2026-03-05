@@ -1,5 +1,4 @@
 // lib/auth.ts
-// Utilidades para manejo de tokens JWT en el cliente
 
 const TOKEN_KEY = 'inmobiscrap_token';
 const USER_KEY  = 'inmobiscrap_user';
@@ -9,7 +8,9 @@ export interface AuthUser {
   name: string;
   email: string;
   avatarUrl?: string;
-  role: string;
+  role: string;      // "user" | "admin"
+  plan: string;      // "base" | "pro"
+  credits: number;
 }
 
 export function getToken(): string | null {
@@ -41,13 +42,22 @@ export function isLoggedIn(): boolean {
   const token = getToken();
   if (!token) return false;
   try {
-    // Decodificar payload sin verificar firma (solo cliente)
     const payload = JSON.parse(atob(token.split('.')[1]));
-    // Verificar expiración
     return payload.exp * 1000 > Date.now();
-  } catch {
-    return false;
-  }
+  } catch { return false; }
+}
+
+/** Decodifica claims del JWT sin backend */
+export function getTokenClaims(): { plan: string; role: string } {
+  const token = getToken();
+  if (!token) return { plan: 'base', role: 'user' };
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return {
+      plan: payload.plan || 'base',
+      role: payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || payload.role || 'user',
+    };
+  } catch { return { plan: 'base', role: 'user' }; }
 }
 
 export function logout(): void {
@@ -55,7 +65,6 @@ export function logout(): void {
   window.location.href = '/';
 }
 
-// Headers de autorización para axios/fetch
 export function authHeaders(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
