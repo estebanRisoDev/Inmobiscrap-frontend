@@ -1,28 +1,36 @@
 'use client';
 // app/botdashboard/page.tsx
-// CAMBIO: Agregado botón "Gestión de Usuarios" y import del dialog
+// CAMBIO: Agrega modal "Estadísticas de Bots" con gráficos de ejecución y estado.
 
 import { Button, Box, Typography, Paper, Chip, Dialog, DialogTitle, DialogContent,
-  DialogContentText, DialogActions, CircularProgress, Avatar, IconButton } from '@mui/material';
+  DialogContentText, DialogActions, CircularProgress, Avatar, IconButton, Skeleton } from '@mui/material';
 import { DataGrid, GridColDef } from '@mui/x-data-grid';
-import AddIcon from '@mui/icons-material/Add';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import StopIcon from '@mui/icons-material/Stop';
-import DeleteIcon from '@mui/icons-material/Delete';
-import TimelineIcon from '@mui/icons-material/Timeline';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import BarChartIcon from '@mui/icons-material/BarChart';
-import LogoutIcon from '@mui/icons-material/Logout';
-import ScheduleIcon from '@mui/icons-material/Schedule';
-import PeopleIcon from '@mui/icons-material/People';
+import AddIcon          from '@mui/icons-material/Add';
+import PlayArrowIcon    from '@mui/icons-material/PlayArrow';
+import StopIcon         from '@mui/icons-material/Stop';
+import DeleteIcon       from '@mui/icons-material/Delete';
+import TimelineIcon     from '@mui/icons-material/Timeline';
+import VisibilityIcon   from '@mui/icons-material/Visibility';
+import BarChartIcon     from '@mui/icons-material/BarChart';
+import LogoutIcon       from '@mui/icons-material/Logout';
+import ScheduleIcon     from '@mui/icons-material/Schedule';
+import PeopleIcon       from '@mui/icons-material/People';
+import ShowChartIcon    from '@mui/icons-material/ShowChart';
+import CloseIcon        from '@mui/icons-material/Close';
+import SmartToyIcon     from '@mui/icons-material/SmartToy';
+import {
+  AreaChart, Area, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar,
+} from 'recharts';
 import axios from 'axios';
 import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { BotLogDialog } from '@/components/BotLogDialog';
-import { CreateBotDialog } from '@/components/CreateBotDialog';
-import { UserManagementDialog } from '@/components/UserManagementDialog';
-import { useAuth } from '@/context/AuthContext';
-import { authHeaders } from '@/lib/auth';
+import { BotLogDialog }          from '@/components/BotLogDialog';
+import { CreateBotDialog }        from '@/components/CreateBotDialog';
+import { UserManagementDialog }   from '@/components/UserManagementDialog';
+import { useAuth }                from '@/context/AuthContext';
+import { authHeaders }            from '@/lib/auth';
 
 const API_BASE_URL = 'http://localhost:5000';
 
@@ -42,13 +50,247 @@ interface Bot {
   cronExpression?: string;
 }
 
+// ── Paleta para gráficos del modal ─────────────────────────────────────────────
+const CHART_COLORS = {
+  success: '#2a9d8f',
+  error:   '#e76f51',
+  active:  '#1565c0',
+  inactive:'#dee2e6',
+  primary: '#0f4c81',
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MODAL DE ESTADÍSTICAS DE BOTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface BotStatsModalProps {
+  open:    boolean;
+  onClose: () => void;
+  bots:    Bot[];
+}
+
+function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
+  const [trendsData,    setTrendsData]    = useState<any[]>([]);
+  const [loadingTrends, setLoadingTrends] = useState(false);
+
+  // Cargar tendencias de ejecución al abrir
+  useEffect(() => {
+    if (!open) return;
+    setLoadingTrends(true);
+    axios
+      .get(`${API_BASE_URL}/api/analytics/trends`, { headers: authHeaders() })
+      .then(({ data }) => {
+        const arr = Array.isArray(data) ? data : (data?.items || data?.data || data?.trends || []);
+        setTrendsData(arr);
+      })
+      .catch(() => setTrendsData([]))
+      .finally(() => setLoadingTrends(false));
+  }, [open]);
+
+  // ── Datos derivados ──────────────────────────────────────────────
+  const botStatusData = [
+    { name: 'Activos',   value: bots.filter((b) => b.isActive).length  },
+    { name: 'Inactivos', value: bots.filter((b) => !b.isActive).length },
+  ];
+
+  const executionData = trendsData.map((item: any) => ({
+    mes:      item.mes || item.month || '?',
+    exitosas: item.exitosas ?? 0,
+    fallidas: item.fallidas ?? 0,
+  }));
+
+  // Total propiedades scrapeadas por bot (top 8)
+  const topBotsByScraped = [...bots]
+    .sort((a, b) => (b.totalScraped ?? 0) - (a.totalScraped ?? 0))
+    .slice(0, 8)
+    .map((b) => ({ name: b.name.length > 22 ? b.name.slice(0, 22) + '…' : b.name, total: b.totalScraped ?? 0 }));
+
+  // Status distribution
+  const statusDistribution = Object.entries(
+    bots.reduce((acc, b) => {
+      const key = b.status || 'idle';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>)
+  ).map(([name, value]) => ({ name, value }));
+
+  const STATUS_COLORS: Record<string, string> = {
+    idle:      '#9e9e9e',
+    running:   '#1976d2',
+    stopping:  '#f57c00',
+    completed: '#2e7d32',
+    error:     '#d32f2f',
+    stopped:   '#e65100',
+  };
+
+  const StatBox = ({ label, value, color }: { label: string; value: number; color: string }) => (
+    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, textAlign: 'center',
+      border: `1px solid ${color}30`, bgcolor: `${color}08` }}>
+      <Typography variant="h4" sx={{ fontWeight: 800, color, letterSpacing: '-1px' }}>
+        {value}
+      </Typography>
+      <Typography variant="caption" sx={{ color: '#6b7280', fontWeight: 600 }}>
+        {label}
+      </Typography>
+    </Paper>
+  );
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
+      PaperProps={{ sx: { height: '88vh', maxHeight: '88vh', borderRadius: 3 } }}>
+
+      <DialogTitle sx={{ bgcolor: '#0f172a', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <ShowChartIcon />
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Estadísticas de Bots</Typography>
+          <Chip label={`${bots.length} bots`} size="small"
+            sx={{ bgcolor: 'rgba(255,255,255,0.15)', color: 'white', fontWeight: 600 }} />
+        </Box>
+        <IconButton onClick={onClose} sx={{ color: 'white' }}>
+          <CloseIcon />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent sx={{ p: 3, overflowY: 'auto', bgcolor: '#f8f9fa' }}>
+
+        {/* ── KPI rápidos ── */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 2, mb: 3 }}>
+          <StatBox label="Total Bots"      value={bots.length}                                             color="#1565c0" />
+          <StatBox label="Activos"         value={bots.filter((b) => b.isActive).length}                  color="#2a9d8f" />
+          <StatBox label="Ejecutando ahora" value={bots.filter((b) => b.status === 'running').length}     color="#f57c00" />
+          <StatBox label="Con errores"     value={bots.filter((b) => b.status === 'error').length}        color="#d32f2f" />
+        </Box>
+
+        {/* ── Fila 1: Estado + Distribución de status ── */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, mb: 3 }}>
+
+          {/* Estado activo / inactivo */}
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: 'white' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <SmartToyIcon sx={{ color: '#1565c0', fontSize: 20 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                Estado: Activo vs Inactivo
+              </Typography>
+            </Box>
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={botStatusData} cx="50%" cy="50%" labelLine={false}
+                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={90} innerRadius={45} dataKey="value" paddingAngle={3}>
+                  <Cell fill={CHART_COLORS.active}   />
+                  <Cell fill={CHART_COLORS.inactive} />
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </Paper>
+
+          {/* Distribución por status actual */}
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: 'white' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <BarChartIcon sx={{ color: '#1565c0', fontSize: 20 }} />
+              <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                Distribución por Estado Actual
+              </Typography>
+            </Box>
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={statusDistribution} cx="50%" cy="50%"
+                  outerRadius={90} innerRadius={45} dataKey="value" paddingAngle={3}
+                  label={({ name, value }) => `${name} (${value})`} labelLine={false}>
+                  {statusDistribution.map((entry, i) => (
+                    <Cell key={i} fill={STATUS_COLORS[entry.name] ?? '#9e9e9e'} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </Paper>
+        </Box>
+
+        {/* ── Ejecuciones Mensuales (área) ── */}
+        <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: 'white', mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <TimelineIcon sx={{ color: '#1565c0', fontSize: 20 }} />
+            <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              Ejecuciones Mensuales
+            </Typography>
+          </Box>
+          {loadingTrends ? <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 1 }} /> :
+           executionData.length === 0 ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240, color: '#9ca3af' }}>
+              <Typography variant="body2">Sin datos de ejecuciones registradas</Typography>
+            </Box>
+          ) : (
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={executionData}>
+                <defs>
+                  <linearGradient id="gradSuccess" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={CHART_COLORS.success} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={CHART_COLORS.success} stopOpacity={0}   />
+                  </linearGradient>
+                  <linearGradient id="gradError" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={CHART_COLORS.error} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={CHART_COLORS.error} stopOpacity={0}   />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Area type="monotone" dataKey="exitosas" stroke={CHART_COLORS.success} fill="url(#gradSuccess)" strokeWidth={2} name="Exitosas" />
+                <Area type="monotone" dataKey="fallidas" stroke={CHART_COLORS.error}   fill="url(#gradError)"   strokeWidth={2} name="Fallidas"  />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </Paper>
+
+        {/* ── Top bots por propiedades scrapeadas ── */}
+        <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: 'white' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <ShowChartIcon sx={{ color: '#1565c0', fontSize: 20 }} />
+            <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+              Top Bots por Propiedades Scrapeadas
+            </Typography>
+          </Box>
+          {topBotsByScraped.length === 0 ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#9ca3af' }}>
+              <Typography variant="body2">Sin bots configurados</Typography>
+            </Box>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(200, topBotsByScraped.length * 36)}>
+              <BarChart data={topBotsByScraped} layout="vertical" barSize={18}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis type="number" tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
+                <Tooltip formatter={(v: number) => [v.toLocaleString('es-CL'), 'Propiedades']} />
+                <Bar dataKey="total" fill={CHART_COLORS.primary} name="Total scrapeadas" radius={[0, 4, 4, 0]}>
+                  {topBotsByScraped.map((_, i) => (
+                    <Cell key={i} fill={i === 0 ? '#1565c0' : i === 1 ? '#1976d2' : '#42a5f5'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Paper>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PÁGINA PRINCIPAL — GESTIÓN DE BOTS
+// ══════════════════════════════════════════════════════════════════════════════
+
 export default function Home() {
-  const [dataBots, setDataBots] = useState<Bot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [dataBots,       setDataBots]       = useState<Bot[]>([]);
+  const [loading,        setLoading]        = useState(true);
+  const [logDialogOpen,  setLogDialogOpen]  = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [userMgmtOpen, setUserMgmtOpen] = useState(false);  // ← NUEVO
-  const [selectedBotId, setSelectedBotId] = useState<number | undefined>(undefined);
+  const [userMgmtOpen,   setUserMgmtOpen]   = useState(false);
+  const [botStatsOpen,   setBotStatsOpen]   = useState(false);  // ← NUEVO
+  const [selectedBotId,  setSelectedBotId]  = useState<number | undefined>(undefined);
 
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; bot: Bot | null; deleting: boolean }>({
     open: false, bot: null, deleting: false,
@@ -187,8 +429,8 @@ export default function Home() {
       field: 'actions', headerName: 'Acciones', width: 290, headerAlign: 'center', align: 'center', sortable: false,
       renderCell: (params) => {
         const bot: Bot = params.row;
-        const isRunning  = bot.status === 'running';
-        const isStopping = bot.status === 'stopping';
+        const isRunning   = bot.status === 'running';
+        const isStopping  = bot.status === 'stopping';
         const isCompleted = bot.status === 'completed';
 
         return (
@@ -197,14 +439,13 @@ export default function Home() {
               onClick={() => handleViewLogs(bot.id)} sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5 }}>
               Logs
             </Button>
-            {!isRunning && !isStopping && !isCompleted && (
+            {!isRunning && !isStopping && (
               <Button variant="contained" size="small" startIcon={<PlayArrowIcon />}
                 onClick={() => handleRunBot(bot.id)} disabled={!bot.isActive}
-                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: '#1565c0' }}>
-                Ejecutar
+                sx={{ textTransform: 'none', borderRadius: 2, minWidth: 0, px: 1.5, bgcolor: isCompleted ? '#2e7d32' : '#1565c0', '&:hover': { bgcolor: isCompleted ? '#1b5e20' : '#0d47a1' } }}>
+                {isCompleted ? 'Re-ejecutar' : 'Ejecutar'}
               </Button>
             )}
-            {isCompleted && <Chip label="Completado" size="small" color="success" sx={{ fontWeight: 600 }} />}
             {(isRunning || isStopping) && (
               <Button variant="contained" size="small"
                 startIcon={isStopping ? <CircularProgress size={14} color="inherit" /> : <StopIcon />}
@@ -257,21 +498,29 @@ export default function Home() {
               </Box>
             )}
 
-            {/* ★ NUEVO: Gestión de Usuarios */}
+            {/* Gestión de Usuarios */}
             {isAdmin && (
-              <Button
-                variant="contained"
-                startIcon={<PeopleIcon />}
+              <Button variant="contained" startIcon={<PeopleIcon />}
                 onClick={() => setUserMgmtOpen(true)}
                 sx={{
                   textTransform: 'none', borderRadius: 2, px: 3,
                   background: 'linear-gradient(45deg, #dc2626 30%, #ef4444 90%)',
                   boxShadow: '0 3px 5px 2px rgba(220, 38, 38, .2)',
-                }}
-              >
+                }}>
                 Gestión de Usuarios
               </Button>
             )}
+
+            {/* ★ NUEVO: Estadísticas de Bots */}
+            <Button variant="contained" startIcon={<ShowChartIcon />}
+              onClick={() => setBotStatsOpen(true)}
+              sx={{
+                textTransform: 'none', borderRadius: 2, px: 3,
+                background: 'linear-gradient(45deg, #0f4c81 30%, #1565c0 90%)',
+                boxShadow: '0 3px 5px 2px rgba(15, 76, 129, .3)',
+              }}>
+              Estadísticas
+            </Button>
 
             <Button variant="contained" color="secondary" startIcon={<TimelineIcon />}
               onClick={() => { setSelectedBotId(undefined); setLogDialogOpen(true); }}
@@ -363,8 +612,10 @@ export default function Home() {
 
       <CreateBotDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onBotCreated={fetchBots} />
 
-      {/* ★ NUEVO: Dialog de gestión de usuarios */}
       <UserManagementDialog open={userMgmtOpen} onClose={() => setUserMgmtOpen(false)} />
+
+      {/* ★ NUEVO: Modal de estadísticas de bots */}
+      <BotStatsModal open={botStatsOpen} onClose={() => setBotStatsOpen(false)} bots={dataBots} />
 
       <style jsx global>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }

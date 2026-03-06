@@ -1,8 +1,9 @@
 'use client';
-// app/page.tsx — Landing page de InmobiScrap
+// app/page.tsx — Landing page de InmobiScrap (focus métricas + planes)
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -16,39 +17,42 @@ const C = {
   text:      '#e2eaf2',
   muted:     '#556070',
   dim:       '#1a2535',
+  creditHigh:  '#00ff88',
+  creditMid:   '#f59e0b',
+  creditLow:   '#ef4444',
 };
 
 // ── Features ──────────────────────────────────────────────────────────────────
 const FEATURES = [
   {
-    icon: '🤖',
-    title: 'Bots de Scraping',
-    desc: 'Bots configurables que recorren portales inmobiliarios chilenos automáticamente. Soportan JavaScript dinámico vía Playwright y detección anti-bot.',
+    icon: '📈',
+    title: 'Métricas de Mercado',
+    desc: 'Distribución por tipo, precios promedio, comunas top, tendencias mensuales y comparativas en un solo lugar.',
   },
   {
     icon: '🧠',
-    title: 'Procesamiento LLM',
-    desc: 'Claude 4.6 Sonnet via AWS Bedrock extrae y estructura datos no normalizados: precios, ubicaciones, características y tipos de propiedad.',
-  },
-  {
-    icon: '📊',
-    title: 'Dashboard Analítico',
-    desc: 'Visualizaciones en tiempo real de distribución por tipo, precios promedio, comunas top, tendencias mensuales y comparativas de mercado.',
+    title: 'Datos Estructurados con LLM',
+    desc: 'Claude 4.6 Sonnet via AWS Bedrock normaliza y enriquece datos para que puedas analizar sin ruido.',
   },
   {
     icon: '⚡',
-    title: 'Logs en Tiempo Real',
-    desc: 'Sistema SignalR que transmite el progreso de cada bot en vivo: fases de scraping, propiedades procesadas, errores y métricas de ejecución.',
+    title: 'Actualización Recurrente',
+    desc: 'Los dashboards se alimentan con ejecuciones programadas y controladas. Tú solo consumes insights.',
   },
   {
-    icon: '🗓️',
-    title: 'Programación Cron',
-    desc: 'Cada bot puede configurarse con expresiones cron independientes. Ejecuciones automáticas sin intervención manual.',
+    icon: '🔎',
+    title: 'Trazabilidad',
+    desc: 'Logs y auditoría por ejecución para entender cobertura, calidad de extracción y variaciones.',
   },
   {
     icon: '🔐',
-    title: 'Autenticación JWT',
-    desc: 'Sistema completo con registro, login por email y OAuth Google. Tokens seguros con expiración configurable.',
+    title: 'Acceso Seguro',
+    desc: 'Auth JWT + OAuth. Roles Admin/Pro. El acceso a métricas y créditos se valida del lado servidor.',
+  },
+  {
+    icon: '🗓️',
+    title: 'Programación',
+    desc: 'Ejecuciones automáticas (cron) y recolección continua para que tus métricas no queden desactualizadas.',
   },
 ];
 
@@ -67,19 +71,84 @@ const STACK = [
   { label: 'Claude 4.6',   color: '#cc9b7a' },
 ];
 
-// ── Animación de terminal ─────────────────────────────────────────────────────
-const TERMINAL_LINES = [
-  { delay: 0,    text: '$ inmobiscrap start --all-bots',          color: C.accent },
-  { delay: 600,  text: '🚀 Bot "Portal Inmobiliario RM" iniciado', color: C.text   },
-  { delay: 1200, text: '🌐 Descargando HTML... 284,392 chars',     color: C.muted  },
-  { delay: 1800, text: '🤖 Enviando a AWS Bedrock (Claude 4.6)…',  color: C.text   },
-  { delay: 2400, text: '✅ 24 propiedades extraídas en chunk 1/2',  color: C.accent },
-  { delay: 3000, text: '✅ 18 propiedades extraídas en chunk 2/2',  color: C.accent },
-  { delay: 3600, text: '💾 42 nuevas propiedades guardadas',        color: C.primary},
-  { delay: 4200, text: '🎉 Bot completado. Total acumulado: 1,847', color: C.primary},
+const INITIAL_CREDITS = 50;
+
+// ── Planes ────────────────────────────────────────────────────────────────────
+const PLANS = [
+  {
+    id: 'base',
+    name: 'Base',
+    priceCLP: 0,
+    badge: 'Gratis',
+    highlights: ['50 créditos iniciales', 'Recarga diaria: +20', 'Acceso a dashboards'],
+    cta: 'Empezar',
+  },
+  {
+    id: 'pack50',
+    name: 'Pack 50',
+    priceCLP: 2000,
+    badge: 'Créditos',
+    highlights: ['+50 créditos', 'Ideal para pruebas', 'Uso bajo demanda'],
+    cta: 'Comprar créditos',
+  },
+  {
+    id: 'pack100',
+    name: 'Pack 100',
+    priceCLP: 3000,
+    badge: 'Créditos',
+    highlights: ['+100 créditos', 'Mejor costo/beneficio', 'Uso bajo demanda'],
+    cta: 'Comprar créditos',
+  },
+  {
+    id: 'pack1000',
+    name: 'Pack 1000',
+    priceCLP: 15000,
+    badge: 'Créditos',
+    highlights: ['+1000 créditos', 'Para uso intensivo', 'Uso bajo demanda'],
+    cta: 'Comprar créditos',
+  },
+  {
+    id: 'pro',
+    name: 'Pro',
+    priceCLP: 100000,
+    badge: 'Ilimitado',
+    highlights: ['Créditos ilimitados', 'Acceso completo a métricas', 'Prioridad y features pro'],
+    cta: 'Actualizar a Pro',
+    featured: true,
+  },
 ];
 
-// ── Componentes ───────────────────────────────────────────────────────────────
+function formatCLP(n: number) {
+  if (n === 0) return 'Gratis';
+  return n.toLocaleString('es-CL', { style: 'currency', currency: 'CLP', maximumFractionDigits: 0 });
+}
+
+// ── Animación de terminal ─────────────────────────────────────────────────────
+const TERMINAL_LINES = [
+  { delay: 0,    text: '$ inmobiscrap metrics --latest',            color: C.accent },
+  { delay: 600,  text: '📊 Cargando dashboard: RM · Últimos 30 días', color: C.text   },
+  { delay: 1200, text: '📈 Tendencia precio promedio: +3.2% MoM',     color: C.primary},
+  { delay: 1800, text: '🏙️ Comuna top: Ñuñoa · 214 publicaciones',     color: C.text   },
+  { delay: 2400, text: '🏷️ Tipo dominante: Departamento (62%)',       color: C.accent },
+  { delay: 3000, text: '✅ Métricas listas. Fuente: 6 portales',       color: C.accent },
+  { delay: 3600, text: '🔎 Calidad extracción: 98.1% campos completos', color: C.primary},
+];
+
+function getCreditColor(credits: number): string {
+  if (credits <= 0)  return C.creditLow;
+  if (credits <= 10) return C.creditMid;
+  return C.creditHigh;
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+// ── Sub-componentes ───────────────────────────────────────────────────────────
 
 function Terminal() {
   const [visibleLines, setVisibleLines] = useState<number[]>([]);
@@ -143,10 +212,262 @@ function FeatureCard({ icon, title, desc }: { icon: string; title: string; desc:
   );
 }
 
-// ── Página principal ──────────────────────────────────────────────────────────
+// ── Gráfico bonito (SVG) ─────────────────────────────────────────────────────
+function MetricsChart() {
+  // Datos “demo” (si luego quieres, lo conectamos a un endpoint público /api/metrics/preview)
+  const points = [18, 22, 19, 28, 31, 27, 35, 41, 38, 46, 52, 49];
+  const w = 520, h = 260, pad = 22;
 
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const sx = (i: number) => pad + (i * (w - pad * 2)) / (points.length - 1);
+  const sy = (v: number) => pad + (h - pad * 2) * (1 - (v - min) / (max - min || 1));
+
+  const d = points
+    .map((v, i) => `${i === 0 ? 'M' : 'L'} ${sx(i).toFixed(2)} ${sy(v).toFixed(2)}`)
+    .join(' ');
+
+  const area = `${d} L ${(w - pad).toFixed(2)} ${(h - pad).toFixed(2)} L ${pad.toFixed(2)} ${(h - pad).toFixed(2)} Z`;
+
+  return (
+    <div style={s.chartCard}>
+      <div style={s.chartHeader}>
+        <div>
+          <div style={s.chartTitle}>Vista previa de métricas</div>
+          <div style={s.chartSub}>Tendencia de publicaciones procesadas (demo)</div>
+        </div>
+        <div style={s.chartPill}>Últimos 30 días</div>
+      </div>
+
+      <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
+        <defs>
+          <linearGradient id="areaGrad" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor={C.primary} stopOpacity="0.28" />
+            <stop offset="1" stopColor={C.primary} stopOpacity="0" />
+          </linearGradient>
+          <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="6" result="b" />
+            <feMerge>
+              <feMergeNode in="b" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* Grid */}
+        {[0, 1, 2, 3].map((i) => {
+          const y = pad + (i * (h - pad * 2)) / 3;
+          return <line key={i} x1={pad} y1={y} x2={w - pad} y2={y} stroke={`${C.border}66`} strokeWidth="1" />;
+        })}
+
+        {/* Área */}
+        <path d={area} fill="url(#areaGrad)" />
+
+        {/* Línea */}
+        <path d={d} fill="none" stroke={C.primary} strokeWidth="2.5" filter="url(#softGlow)" />
+
+        {/* Puntos */}
+        {points.map((v, i) => (
+          <g key={i}>
+            <circle cx={sx(i)} cy={sy(v)} r="4.2" fill={C.accent} opacity="0.9" />
+            <circle cx={sx(i)} cy={sy(v)} r="7.5" fill={C.accent} opacity="0.12" />
+          </g>
+        ))}
+      </svg>
+
+      <div style={s.chartLegend}>
+        <span style={s.legendDot} />
+        <span style={{ color: C.muted, fontSize: '12px', fontFamily: '"Space Mono", monospace' }}>
+          Publicaciones procesadas
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Cards de planes ───────────────────────────────────────────────────────────
+function PlanCard({
+  plan,
+  onSelect,
+}: {
+  plan: typeof PLANS[number];
+  onSelect: (planId: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const featured = !!plan.featured;
+
+  return (
+    <div
+      style={{
+        ...s.planCard,
+        borderColor: featured ? `${C.accent}55` : hovered ? `${C.primary}55` : C.border,
+        background: featured ? `linear-gradient(180deg, ${C.surfaceAlt}, ${C.surface})` : hovered ? C.surfaceAlt : C.surface,
+        transform: hovered ? 'translateY(-4px)' : 'translateY(0)',
+        boxShadow: featured ? `0 18px 60px ${C.accent}10` : hovered ? `0 12px 40px ${C.primary}15` : 'none',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div style={s.planTopRow}>
+        <div style={s.planName}>{plan.name}</div>
+        <div style={{
+          ...s.planBadge,
+          color: featured ? C.accent : C.primary,
+          background: featured ? `${C.accent}18` : `${C.primary}12`,
+          border: `1px solid ${featured ? `${C.accent}44` : `${C.primary}33`}`,
+        }}>
+          {plan.badge}
+        </div>
+      </div>
+
+      <div style={s.planPrice}>{formatCLP(plan.priceCLP)}</div>
+
+      <div style={s.planList}>
+        {plan.highlights.map((h) => (
+          <div key={h} style={s.planItem}>
+            <span style={{ color: C.accent }}>✓</span>
+            <span>{h}</span>
+          </div>
+        ))}
+      </div>
+
+      <button
+        style={{
+          ...s.planBtn,
+          background: featured ? `linear-gradient(135deg, ${C.accent}, ${C.primary})` : `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
+          opacity: hovered ? 0.95 : 1,
+        }}
+        onClick={() => onSelect(plan.id)}
+      >
+        {plan.cta} →
+      </button>
+
+      {plan.id === 'base' && (
+        <div style={s.planNote}>
+          * La recarga diaria aplica al plan Base. Los packs suman créditos al saldo.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── User pill para el navbar ──────────────────────────────────────────────────
+function UserNavPill({
+  user,
+  isAdmin,
+  isPro,
+  onLogout,
+  onDashboard,
+}: {
+  user: any;
+  isAdmin: boolean;
+  isPro: boolean;
+  onLogout: () => void;
+  onDashboard: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const creditColor = getCreditColor(user.credits ?? 0);
+  const showCredits = !isAdmin && !isPro;
+  const creditPct   = Math.max(0, Math.min(100, ((user.credits ?? 0) / INITIAL_CREDITS) * 100));
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setMenuOpen((v) => !v)} style={s.userPill}>
+        <div style={s.avatar}>
+          {user.avatarUrl
+            ? <img src={user.avatarUrl} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+            : <span style={{ fontSize: '12px', fontWeight: 700, color: '#fff' }}>{getInitials(user.name)}</span>
+          }
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 700, color: C.text, lineHeight: 1 }}>
+            {user.name.split(' ')[0]}
+          </span>
+          {showCredits && (
+            <span style={{ fontSize: '11px', color: creditColor, lineHeight: 1, fontFamily: '"Space Mono", monospace' }}>
+              {user.credits ?? 0} créditos
+            </span>
+          )}
+          {(isAdmin || isPro) && (
+            <span style={{ fontSize: '10px', color: isAdmin ? '#ef4444' : C.accent, lineHeight: 1, fontWeight: 700, letterSpacing: '0.5px' }}>
+              {isAdmin ? 'ADMIN' : 'PRO'}
+            </span>
+          )}
+        </div>
+
+        <span style={{
+          fontSize: '10px', color: C.muted, marginLeft: '2px',
+          transform: menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform 0.2s',
+          display: 'inline-block',
+        }}>▼</span>
+      </button>
+
+      {showCredits && (
+        <div style={{
+          position: 'absolute', bottom: '-6px', left: '10px', right: '10px',
+          height: '3px', borderRadius: '2px', background: `${creditColor}22`, overflow: 'hidden',
+        }}>
+          <div style={{
+            width: `${creditPct}%`, height: '100%',
+            background: creditColor, borderRadius: '2px',
+            transition: 'width 0.4s ease',
+          }} />
+        </div>
+      )}
+
+      {menuOpen && (
+        <div style={s.dropdownMenu}>
+          <div style={s.dropdownHeader}>
+            <div style={{ ...s.avatar, width: '36px', height: '36px' }}>
+              {user.avatarUrl
+                ? <img src={user.avatarUrl} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                : <span style={{ fontSize: '14px', fontWeight: 700, color: '#fff' }}>{getInitials(user.name)}</span>
+              }
+            </div>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: C.text }}>{user.name}</div>
+              <div style={{ fontSize: '11px', color: C.muted }}>{user.email}</div>
+            </div>
+          </div>
+
+          <div style={s.dropdownDivider} />
+
+          <button style={s.dropdownBtn} onClick={() => { setMenuOpen(false); onDashboard(); }}>
+            <span>📊</span>
+            <span>{isAdmin ? 'Bot Dashboard' : 'Dashboard'}</span>
+          </button>
+
+          <div style={s.dropdownDivider} />
+
+          <button
+            style={{ ...s.dropdownBtn, color: '#f85149' }}
+            onClick={() => { setMenuOpen(false); onLogout(); }}
+          >
+            <span>↩</span>
+            <span>Cerrar sesión</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Página principal ──────────────────────────────────────────────────────────
 export default function LandingPage() {
   const router = useRouter();
+  const { user, logout, isAdmin, isPro } = useAuth();
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -155,24 +476,71 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', handler);
   }, []);
 
+  const handleDashboard = () => {
+    if (isAdmin) router.push('/botdashboard');
+    else router.push('/dashboards');
+  };
+
+  const handlePlanSelect = (planId: string) => {
+    // UI only: el enforcement real debe ser server-side.
+    if (!user) {
+      router.push('/register');
+      return;
+    }
+    if (planId === 'pro') {
+      router.push('/billing?plan=pro');
+      return;
+    }
+    if (planId.startsWith('pack')) {
+      router.push(`/billing?pack=${planId}`);
+      return;
+    }
+    router.push('/dashboards');
+  };
+
   return (
     <div style={s.page}>
-
-      {/* ── Grid de fondo ── */}
       <div style={s.bgGrid} />
       <div style={s.bgGlow} />
 
       {/* ── Navbar ── */}
-      <nav style={{ ...s.nav, backdropFilter: scrolled ? 'blur(16px)' : 'none', borderBottomColor: scrolled ? C.border : 'transparent' }}>
+      <nav style={{
+        ...s.nav,
+        backdropFilter: scrolled ? 'blur(16px)' : 'none',
+        borderBottomColor: scrolled ? C.border : 'transparent',
+      }}>
         <div style={s.navInner}>
           <div style={s.navLogo}>
             <span style={s.logoIcon}>🏠</span>
             <span style={s.logoText}>InmobiScrap</span>
             <span style={s.logoBadge}>Beta</span>
           </div>
+
           <div style={s.navActions}>
-            <button style={s.navLink} onClick={() => router.push('/login')}>Iniciar sesión</button>
-            <button style={s.navCta} onClick={() => router.push('/register')}>Registrarse →</button>
+            {user ? (
+              <>
+                <button style={s.navDashboardBtn} onClick={handleDashboard}>
+                  📊 Ver métricas →
+                </button>
+
+                <UserNavPill
+                  user={user}
+                  isAdmin={isAdmin}
+                  isPro={isPro}
+                  onLogout={logout}
+                  onDashboard={handleDashboard}
+                />
+              </>
+            ) : (
+              <>
+                <button style={s.navLink} onClick={() => router.push('/login')}>
+                  Iniciar sesión
+                </button>
+                <button style={s.navCta} onClick={() => router.push('/register')}>
+                  Ver métricas → 
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -182,43 +550,87 @@ export default function LandingPage() {
         <div style={s.heroContent}>
           <div style={s.heroBadge}>
             <span style={s.heroBadgeDot} />
-            Powered by Claude 4.6 Sonnet · AWS Bedrock
+            Métricas inmobiliarias · IA + Datos estructurados
           </div>
 
           <h1 style={s.heroTitle}>
-            Inteligencia artificial
+            Dashboards listos
             <br />
-            <span style={s.heroTitleAccent}>para el mercado</span>
+            <span style={s.heroTitleAccent}>para decisiones</span>
             <br />
-            inmobiliario chileno
+            del mercado chileno
           </h1>
 
           <p style={s.heroDesc}>
-            InmobiScrap automatiza la recopilación y análisis de datos de propiedades
-            usando bots de scraping + LLMs. Convierte páginas caóticas en datos
-            estructurados, comparables y accionables.
+            InmobiScrap transforma datos de portales en métricas comparables.
+            Entra, filtra, y entiende precios, comunas, tipos y tendencias sin pelear con páginas caóticas.
           </p>
 
-          <div style={s.heroCtas}>
-            <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
-              Comenzar gratis
-            </button>
-            <button style={s.ctaSecondary} onClick={() => router.push('/login')}>
-              Ya tengo cuenta →
-            </button>
-          </div>
+          {/* CTAs */}
+          {user ? (
+            <div style={s.heroCtas}>
+              <button style={s.ctaPrimary} onClick={handleDashboard}>
+                📊 Ver Dashboard →
+              </button>
+              {!isAdmin && !isPro && (user.credits ?? 0) <= 10 && (
+                <div style={s.creditsWarningHero}>
+                  <span style={{ color: (user.credits ?? 0) === 0 ? C.creditLow : C.creditMid }}>
+                    {(user.credits ?? 0) === 0
+                      ? '⛔ Sin créditos disponibles'
+                      : `⚠ Solo te quedan ${user.credits} créditos`}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={s.heroCtas}>
+              <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
+                📊 Ver métricas gratis
+              </button>
+              <button style={s.ctaSecondary} onClick={() => router.push('/login')}>
+                Ya tengo cuenta →
+              </button>
+            </div>
+          )}
 
           <div style={s.heroSources}>
-            <span style={s.heroSourcesLabel}>Portales soportados:</span>
+            <span style={s.heroSourcesLabel}>Fuentes:</span>
             {SOURCES.map((src) => (
               <span key={src} style={s.sourceChip}>{src}</span>
             ))}
           </div>
         </div>
 
-        {/* Terminal animada */}
         <div style={s.heroTerminal}>
           <Terminal />
+        </div>
+      </section>
+
+      {/* ── Preview Chart ── */}
+      <section style={s.previewSection}>
+        <div style={s.previewInner}>
+          <MetricsChart />
+        </div>
+      </section>
+
+      {/* ── Planes ── */}
+      <section style={s.section}>
+        <div style={s.sectionHeader}>
+          <div style={s.sectionTag}>Planes</div>
+          <h2 style={s.sectionTitle}>Elige cómo consumir métricas</h2>
+          <p style={s.sectionDesc}>
+            Plan Base con recarga diaria, packs de créditos para uso puntual, o Pro ilimitado.
+          </p>
+        </div>
+
+        <div style={s.plansGrid}>
+          {PLANS.map((p) => (
+            <PlanCard key={p.id} plan={p} onSelect={handlePlanSelect} />
+          ))}
+        </div>
+
+        <div style={s.plansFootnote}>
+          Nota: los precios están en CLP. La UI es informativa; compras y upgrades deben validarse en backend con control transaccional.
         </div>
       </section>
 
@@ -226,10 +638,10 @@ export default function LandingPage() {
       <section style={s.statsSection}>
         <div style={s.statsGrid}>
           {[
-            { value: '6+',    label: 'Portales integrados'      },
-            { value: 'LLM',   label: 'Extracción inteligente'   },
-            { value: 'RT',    label: 'Logs en tiempo real'       },
-            { value: 'Cron',  label: 'Programación automática'   },
+            { value: '6+',   label: 'Portales integrados'    },
+            { value: 'LLM',  label: 'Extracción inteligente' },
+            { value: 'RT',   label: 'Logs en tiempo real'    },
+            { value: 'Cron', label: 'Programación automática'},
           ].map((stat) => (
             <div key={stat.label} style={s.statItem}>
               <div style={s.statValue}>{stat.value}</div>
@@ -243,9 +655,9 @@ export default function LandingPage() {
       <section style={s.section}>
         <div style={s.sectionHeader}>
           <div style={s.sectionTag}>Funcionalidades</div>
-          <h2 style={s.sectionTitle}>Todo lo que necesitas para<br />analizar el mercado</h2>
+          <h2 style={s.sectionTitle}>Métricas, trazabilidad<br />y datos útiles</h2>
           <p style={s.sectionDesc}>
-            Una plataforma completa que va desde la extracción de datos hasta la visualización analítica.
+            Enfocado en consumo de insights: menos fricción, más decisiones.
           </p>
         </div>
         <div style={s.featuresGrid}>
@@ -273,19 +685,34 @@ export default function LandingPage() {
       <section style={s.ctaSection}>
         <div style={s.ctaBox}>
           <div style={s.ctaGlow} />
-          <h2 style={s.ctaTitle}>Empieza a scrapear hoy</h2>
-          <p style={s.ctaDesc}>
-            Crea tu cuenta, configura tu primer bot y obtén datos estructurados
-            del mercado inmobiliario en minutos.
-          </p>
-          <div style={s.heroCtas}>
-            <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
-              Crear cuenta gratis
-            </button>
-            <button style={s.ctaSecondary} onClick={() => router.push('/login')}>
-              Iniciar sesión →
-            </button>
-          </div>
+          {user ? (
+            <>
+              <h2 style={s.ctaTitle}>Listo, {user.name.split(' ')[0]} 👋</h2>
+              <p style={s.ctaDesc}>
+                Entra al dashboard y revisa tendencias, comunas y precios en segundos.
+              </p>
+              <div style={s.heroCtas}>
+                <button style={s.ctaPrimary} onClick={handleDashboard}>
+                  📊 Ver Dashboard →
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 style={s.ctaTitle}>Mira las métricas hoy</h2>
+              <p style={s.ctaDesc}>
+                Crea tu cuenta y accede al dashboard con recarga diaria de créditos en el plan Base.
+              </p>
+              <div style={s.heroCtas}>
+                <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
+                  Crear cuenta gratis
+                </button>
+                <button style={s.ctaSecondary} onClick={() => router.push('/login')}>
+                  Iniciar sesión →
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -297,9 +724,7 @@ export default function LandingPage() {
             <span style={{ ...s.logoText, fontSize: '14px' }}>InmobiScrap</span>
           </div>
           <div style={s.footerRight}>
-            <span style={{ color: C.muted, fontSize: '13px' }}>
-              Hecho con ❤️ en Chile 🇨🇱
-            </span>
+            <span style={{ color: C.muted, fontSize: '13px' }}>Hecho con ❤️ en Chile 🇨🇱</span>
           </div>
         </div>
       </footer>
@@ -309,9 +734,10 @@ export default function LandingPage() {
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html { scroll-behavior: smooth; }
         body { background: ${C.bg}; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-        @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
-        @keyframes glow { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }
+        @keyframes blink  { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        @keyframes float  { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
+        @keyframes glow   { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
     </div>
   );
@@ -347,7 +773,6 @@ const s: Record<string, React.CSSProperties> = {
     animation: 'glow 6s ease-in-out infinite',
   },
 
-  // Navbar
   nav: {
     position: 'fixed',
     top: 0,
@@ -361,16 +786,12 @@ const s: Record<string, React.CSSProperties> = {
   navInner: {
     maxWidth: '1200px',
     margin: '0 auto',
-    padding: '16px 24px',
+    padding: '14px 24px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  navLogo: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
+  navLogo: { display: 'flex', alignItems: 'center', gap: '10px' },
   logoIcon: { fontSize: '22px' },
   logoText: {
     fontFamily: '"Space Mono", monospace',
@@ -390,11 +811,7 @@ const s: Record<string, React.CSSProperties> = {
     letterSpacing: '1px',
     textTransform: 'uppercase' as const,
   },
-  navActions: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  },
+  navActions: { display: 'flex', alignItems: 'center', gap: '12px' },
   navLink: {
     background: 'none',
     border: 'none',
@@ -419,8 +836,84 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: '8px',
     transition: 'opacity 0.2s, transform 0.2s',
   },
+  navDashboardBtn: {
+    background: `${C.primary}12`,
+    border: `1px solid ${C.primary}40`,
+    color: C.primary,
+    fontSize: '13px',
+    fontWeight: 700,
+    fontFamily: '"Syne", sans-serif',
+    cursor: 'pointer',
+    padding: '8px 16px',
+    borderRadius: '8px',
+    transition: 'background 0.2s, border-color 0.2s',
+    letterSpacing: '-0.2px',
+  },
 
-  // Hero
+  userPill: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    background: `${C.surface}cc`,
+    border: `1px solid ${C.border}`,
+    borderRadius: '10px',
+    padding: '7px 12px',
+    cursor: 'pointer',
+    transition: 'border-color 0.2s, background 0.2s',
+    fontFamily: '"Syne", sans-serif',
+    position: 'relative' as const,
+  },
+  avatar: {
+    width: '28px',
+    height: '28px',
+    borderRadius: '50%',
+    background: `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    overflow: 'hidden',
+  },
+
+  dropdownMenu: {
+    position: 'absolute' as const,
+    top: 'calc(100% + 12px)',
+    right: 0,
+    minWidth: '240px',
+    background: '#0d1117',
+    border: `1px solid ${C.border}`,
+    borderRadius: '12px',
+    boxShadow: `0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px ${C.primary}15`,
+    overflow: 'hidden',
+    animation: 'fadeIn 0.15s ease',
+    zIndex: 200,
+  },
+  dropdownHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '16px',
+    background: C.surfaceAlt,
+    borderBottom: `1px solid ${C.border}`,
+  },
+  dropdownDivider: { height: '1px', background: C.border },
+  dropdownBtn: {
+    width: '100%',
+    background: 'none',
+    border: 'none',
+    color: C.text,
+    fontSize: '13px',
+    fontFamily: '"Syne", sans-serif',
+    fontWeight: 600,
+    padding: '12px 16px',
+    cursor: 'pointer',
+    textAlign: 'left' as const,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    transition: 'background 0.15s',
+  },
+
   hero: {
     position: 'relative',
     zIndex: 1,
@@ -432,10 +925,7 @@ const s: Record<string, React.CSSProperties> = {
     gap: '60px',
     flexWrap: 'wrap' as const,
   },
-  heroContent: {
-    flex: '1 1 480px',
-    minWidth: '320px',
-  },
+  heroContent: { flex: '1 1 480px', minWidth: '320px' },
   heroBadge: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -477,7 +967,7 @@ const s: Record<string, React.CSSProperties> = {
     color: C.muted,
     lineHeight: 1.7,
     marginBottom: '36px',
-    maxWidth: '500px',
+    maxWidth: '520px',
   },
   heroCtas: {
     display: 'flex',
@@ -485,6 +975,13 @@ const s: Record<string, React.CSSProperties> = {
     gap: '16px',
     flexWrap: 'wrap' as const,
     marginBottom: '32px',
+  },
+  creditsWarningHero: {
+    display: 'flex',
+    alignItems: 'center',
+    fontSize: '13px',
+    fontFamily: '"Space Mono", monospace',
+    fontWeight: 600,
   },
   ctaPrimary: {
     background: `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
@@ -511,17 +1008,8 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: '10px',
     transition: 'border-color 0.2s, color 0.2s',
   },
-  heroSources: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    flexWrap: 'wrap' as const,
-  },
-  heroSourcesLabel: {
-    fontSize: '12px',
-    color: C.muted,
-    fontFamily: '"Space Mono", monospace',
-  },
+  heroSources: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' as const },
+  heroSourcesLabel: { fontSize: '12px', color: C.muted, fontFamily: '"Space Mono", monospace' },
   sourceChip: {
     fontSize: '11px',
     fontFamily: '"Space Mono", monospace',
@@ -531,13 +1019,60 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
     padding: '3px 8px',
   },
-  heroTerminal: {
-    flex: '1 1 420px',
-    minWidth: '320px',
-    animation: 'float 6s ease-in-out infinite',
+  heroTerminal: { flex: '1 1 420px', minWidth: '320px', animation: 'float 6s ease-in-out infinite' },
+
+  previewSection: {
+    position: 'relative',
+    zIndex: 1,
+    padding: '0 24px 40px',
+  },
+  previewInner: {
+    maxWidth: '1200px',
+    margin: '0 auto',
   },
 
-  // Terminal
+  chartCard: {
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: '16px',
+    padding: '18px 18px 12px',
+    boxShadow: `0 24px 80px rgba(0,0,0,0.35), 0 0 0 1px ${C.primary}10`,
+  },
+  chartHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '12px',
+    marginBottom: '10px',
+  },
+  chartTitle: { fontSize: '14px', fontWeight: 800, color: C.text, letterSpacing: '-0.2px' },
+  chartSub: { fontSize: '12px', color: C.muted, marginTop: '2px' },
+  chartPill: {
+    fontSize: '11px',
+    fontFamily: '"Space Mono", monospace',
+    color: C.primary,
+    background: `${C.primary}12`,
+    border: `1px solid ${C.primary}33`,
+    borderRadius: '999px',
+    padding: '6px 10px',
+    whiteSpace: 'nowrap' as const,
+  },
+  chartLegend: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginTop: '10px',
+    paddingTop: '10px',
+    borderTop: `1px solid ${C.border}`,
+  },
+  legendDot: {
+    width: '10px',
+    height: '10px',
+    borderRadius: '50%',
+    background: C.accent,
+    boxShadow: `0 0 20px ${C.accent}33`,
+  },
+
   terminal: {
     background: '#0a0e14',
     border: `1px solid ${C.border}`,
@@ -553,12 +1088,7 @@ const s: Record<string, React.CSSProperties> = {
     gap: '8px',
     borderBottom: `1px solid ${C.border}`,
   },
-  dot: {
-    width: '12px',
-    height: '12px',
-    borderRadius: '50%',
-    display: 'inline-block',
-  },
+  dot: { width: '12px', height: '12px', borderRadius: '50%', display: 'inline-block' },
   terminalTitle: {
     marginLeft: 'auto',
     marginRight: 'auto',
@@ -573,18 +1103,9 @@ const s: Record<string, React.CSSProperties> = {
     flexDirection: 'column' as const,
     gap: '10px',
   },
-  terminalLine: {
-    fontFamily: '"Space Mono", monospace',
-    fontSize: '13px',
-    lineHeight: 1.5,
-  },
-  cursor: {
-    animation: 'blink 1s infinite',
-    display: 'inline-block',
-    color: C.accent,
-  },
+  terminalLine: { fontFamily: '"Space Mono", monospace', fontSize: '13px', lineHeight: 1.5 },
+  cursor: { animation: 'blink 1s infinite', display: 'inline-block', color: C.accent },
 
-  // Stats
   statsSection: {
     position: 'relative',
     zIndex: 1,
@@ -600,11 +1121,7 @@ const s: Record<string, React.CSSProperties> = {
     gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: '0',
   },
-  statItem: {
-    textAlign: 'center' as const,
-    padding: '20px',
-    borderRight: `1px solid ${C.border}`,
-  },
+  statItem: { textAlign: 'center' as const, padding: '20px', borderRight: `1px solid ${C.border}` },
   statValue: {
     fontFamily: '"Space Mono", monospace',
     fontSize: '32px',
@@ -613,24 +1130,10 @@ const s: Record<string, React.CSSProperties> = {
     marginBottom: '6px',
     letterSpacing: '-1px',
   },
-  statLabel: {
-    fontSize: '13px',
-    color: C.muted,
-    fontWeight: 600,
-  },
+  statLabel: { fontSize: '13px', color: C.muted, fontWeight: 600 },
 
-  // Sections
-  section: {
-    position: 'relative',
-    zIndex: 1,
-    maxWidth: '1200px',
-    margin: '0 auto',
-    padding: '100px 24px',
-  },
-  sectionHeader: {
-    textAlign: 'center' as const,
-    marginBottom: '64px',
-  },
+  section: { position: 'relative', zIndex: 1, maxWidth: '1200px', margin: '0 auto', padding: '90px 24px' },
+  sectionHeader: { textAlign: 'center' as const, marginBottom: '54px' },
   sectionTag: {
     display: 'inline-block',
     fontSize: '11px',
@@ -653,15 +1156,59 @@ const s: Record<string, React.CSSProperties> = {
     marginBottom: '16px',
     letterSpacing: '-1.5px',
   },
-  sectionDesc: {
-    fontSize: '16px',
-    color: C.muted,
-    maxWidth: '500px',
-    margin: '0 auto',
-    lineHeight: 1.7,
-  },
+  sectionDesc: { fontSize: '16px', color: C.muted, maxWidth: '560px', margin: '0 auto', lineHeight: 1.7 },
 
-  // Features grid
+  plansGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: '18px',
+  },
+  planCard: {
+    border: `1px solid ${C.border}`,
+    borderRadius: '14px',
+    padding: '22px',
+    transition: 'all 0.25s ease',
+  },
+  planTopRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    marginBottom: '10px',
+  },
+  planName: { fontSize: '16px', fontWeight: 800, color: C.text, letterSpacing: '-0.2px' },
+  planBadge: {
+    fontSize: '10px',
+    fontWeight: 800,
+    letterSpacing: '1px',
+    textTransform: 'uppercase' as const,
+    borderRadius: '999px',
+    padding: '5px 10px',
+  },
+  planPrice: {
+    fontFamily: '"Space Mono", monospace',
+    fontSize: '22px',
+    fontWeight: 800,
+    color: C.text,
+    marginBottom: '14px',
+  },
+  planList: { display: 'flex', flexDirection: 'column' as const, gap: '10px', marginBottom: '16px' },
+  planItem: { display: 'flex', alignItems: 'center', gap: '10px', color: C.muted, fontSize: '13px', lineHeight: 1.4 },
+  planBtn: {
+    width: '100%',
+    border: 'none',
+    color: '#fff',
+    fontSize: '13px',
+    fontWeight: 800,
+    fontFamily: '"Syne", sans-serif',
+    cursor: 'pointer',
+    padding: '11px 14px',
+    borderRadius: '10px',
+    transition: 'opacity 0.2s',
+  },
+  planNote: { marginTop: '10px', fontSize: '11px', color: C.muted, lineHeight: 1.5 },
+  plansFootnote: { marginTop: '16px', fontSize: '12px', color: C.muted, textAlign: 'center' as const },
+
   featuresGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
@@ -675,24 +1222,10 @@ const s: Record<string, React.CSSProperties> = {
     transition: 'all 0.25s ease',
     cursor: 'default',
   },
-  featureIcon: {
-    fontSize: '28px',
-    marginBottom: '16px',
-  },
-  featureTitle: {
-    fontSize: '17px',
-    fontWeight: 700,
-    color: C.text,
-    marginBottom: '10px',
-    letterSpacing: '-0.3px',
-  },
-  featureDesc: {
-    fontSize: '14px',
-    color: C.muted,
-    lineHeight: 1.7,
-  },
+  featureIcon: { fontSize: '28px', marginBottom: '16px' },
+  featureTitle: { fontSize: '17px', fontWeight: 700, color: C.text, marginBottom: '10px', letterSpacing: '-0.3px' },
+  featureDesc: { fontSize: '14px', color: C.muted, lineHeight: 1.7 },
 
-  // Stack
   stackSection: {
     borderTop: `1px solid ${C.border}`,
     background: C.surface,
@@ -715,29 +1248,11 @@ const s: Record<string, React.CSSProperties> = {
     border: `1px solid ${C.border}`,
     borderRadius: '8px',
     padding: '10px 18px',
-    transition: 'border-color 0.2s',
   },
-  stackDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
-  stackLabel: {
-    fontFamily: '"Space Mono", monospace',
-    fontSize: '13px',
-    color: C.text,
-    fontWeight: 700,
-  },
+  stackDot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
+  stackLabel: { fontFamily: '"Space Mono", monospace', fontSize: '13px', color: C.text, fontWeight: 700 },
 
-  // CTA final
-  ctaSection: {
-    position: 'relative',
-    zIndex: 1,
-    padding: '100px 24px',
-    display: 'flex',
-    justifyContent: 'center',
-  },
+  ctaSection: { position: 'relative', zIndex: 1, padding: '100px 24px', display: 'flex', justifyContent: 'center' },
   ctaBox: {
     position: 'relative',
     maxWidth: '680px',
@@ -774,13 +1289,7 @@ const s: Record<string, React.CSSProperties> = {
     marginBottom: '36px',
   },
 
-  // Footer
-  footer: {
-    position: 'relative',
-    zIndex: 1,
-    borderTop: `1px solid ${C.border}`,
-    background: C.surface,
-  },
+  footer: { position: 'relative', zIndex: 1, borderTop: `1px solid ${C.border}`, background: C.surface },
   footerInner: {
     maxWidth: '1200px',
     margin: '0 auto',
@@ -791,9 +1300,5 @@ const s: Record<string, React.CSSProperties> = {
     flexWrap: 'wrap' as const,
     gap: '16px',
   },
-  footerRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
+  footerRight: { display: 'flex', alignItems: 'center', gap: '16px' },
 };

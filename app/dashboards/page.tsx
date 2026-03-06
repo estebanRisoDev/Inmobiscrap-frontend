@@ -1,9 +1,7 @@
 'use client';
 // app/dashboards/page.tsx
-// FIXES:
-// 1. Radar chart: tooltip muestra valores REALES (3.0 dormitorios, 98 m², etc.)
-// 2. Barra de créditos siempre visible para usuarios base
-// 3. Integración plan/role con AuthContext
+// REFACTOR: Eliminados gráficos de bots → movidos a modal en botdashboard.
+// NUEVO: Gráficos de historial de propiedades (precios, cambios, tracking).
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import axios from 'axios';
@@ -11,37 +9,43 @@ import {
   Box, Paper, Typography, Card, CardContent, CircularProgress,
   Alert, Button, Chip, Select, MenuItem, FormControl,
   InputLabel, IconButton, Skeleton, Avatar, Divider,
-  ToggleButton, ToggleButtonGroup, LinearProgress,
+  ToggleButton, ToggleButtonGroup, LinearProgress, Tooltip,
 } from '@mui/material';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartTooltip, Legend, ResponsiveContainer,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  AreaChart, Area,
+  AreaChart, Area, LineChart, Line, ComposedChart,
 } from 'recharts';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import HomeIcon from '@mui/icons-material/Home';
-import ApartmentIcon from '@mui/icons-material/Apartment';
-import BathtubIcon from '@mui/icons-material/Bathtub';
-import BedIcon from '@mui/icons-material/Bed';
-import SquareFootIcon from '@mui/icons-material/SquareFoot';
-import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import LocationCityIcon from '@mui/icons-material/LocationCity';
-import FilterListIcon from '@mui/icons-material/FilterList';
-import ClearIcon from '@mui/icons-material/Clear';
-import MapIcon from '@mui/icons-material/Map';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import LogoutIcon from '@mui/icons-material/Logout';
-import StarIcon from '@mui/icons-material/Star';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import TokenIcon from '@mui/icons-material/Token';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
-import { authHeaders } from '@/lib/auth';
+import RefreshIcon       from '@mui/icons-material/Refresh';
+import HomeIcon          from '@mui/icons-material/Home';
+import ApartmentIcon     from '@mui/icons-material/Apartment';
+import BathtubIcon       from '@mui/icons-material/Bathtub';
+import BedIcon           from '@mui/icons-material/Bed';
+import SquareFootIcon    from '@mui/icons-material/SquareFoot';
+import AttachMoneyIcon   from '@mui/icons-material/AttachMoney';
+import TrendingUpIcon    from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon  from '@mui/icons-material/TrendingDown';
+import LocationCityIcon  from '@mui/icons-material/LocationCity';
+import FilterListIcon    from '@mui/icons-material/FilterList';
+import ClearIcon         from '@mui/icons-material/Clear';
+import MapIcon           from '@mui/icons-material/Map';
+import ArrowBackIcon     from '@mui/icons-material/ArrowBack';
+import LogoutIcon        from '@mui/icons-material/Logout';
+import StarIcon          from '@mui/icons-material/Star';
+import SmartToyIcon      from '@mui/icons-material/SmartToy';
+import TokenIcon         from '@mui/icons-material/Token';
+import TimelineIcon      from '@mui/icons-material/Timeline';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import ChangeCircleIcon  from '@mui/icons-material/ChangeCircle';
+import NewReleasesIcon   from '@mui/icons-material/NewReleases';
+import { useRouter }     from 'next/navigation';
+import { useAuth }       from '@/context/AuthContext';
+import { authHeaders }   from '@/lib/auth';
 
 const API_BASE_URL = 'http://localhost:5000';
-const INITIAL_CREDITS = 50; // Para la barra de progreso
+const INITIAL_CREDITS = 50;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -75,16 +79,40 @@ interface MarketData {
   sources: Array<{ name: string; value: number }>;
 }
 
-interface Bot { id: number; isActive: boolean; totalScraped?: number; }
+interface TrackingStats {
+  totalTracked: number;
+  newProperties: number;
+  priceChanges: number;
+  delisted: number;
+  unchanged: number;
+  priceHistory?: Array<{ mes: string; avgPrice: number; count: number; minPrice?: number; maxPrice?: number }>;
+  priceChangeBreakdown?: Array<{ label: string; value: number }>;
+}
+
+interface PriceChangeItem {
+  id: number;
+  title: string;
+  neighborhood?: string;
+  city?: string;
+  propertyType?: string;
+  oldPrice: number;
+  newPrice: number;
+  priceDiff: number;
+  priceDiffPct: number;
+  currency: string;
+  changedAt: string;
+  url?: string;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const toArray = (v: any) => (Array.isArray(v) ? v : []);
 
-const formatCLP = (value: number) => {
+const formatCLP = (value: number | undefined | null) => {
+  if (value == null || isNaN(value)) return '—';
   if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(0)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
+  if (value >= 1_000_000)     return `$${(value / 1_000_000).toFixed(0)}M`;
+  if (value >= 1_000)         return `$${(value / 1_000).toFixed(0)}K`;
   return `$${value.toLocaleString('es-CL')}`;
 };
 
@@ -92,58 +120,60 @@ const normalizePropertyType = (type?: string): string => {
   if (!type) return 'Otro';
   const l = type.toLowerCase().trim();
   if (l.includes('departamento') || l.includes('depto')) return 'Departamento';
-  if (l.includes('casa') && !l.includes('prefab')) return 'Casa';
-  if (l.includes('prefab') || l.includes('modular')) return 'Prefabricada';
-  if (l.includes('terreno') || l.includes('parcela')) return 'Terreno';
-  if (l.includes('oficina')) return 'Oficina';
-  if (l.includes('local') || l.includes('comercial')) return 'Local Comercial';
+  if (l.includes('casa') && !l.includes('prefab'))        return 'Casa';
+  if (l.includes('prefab') || l.includes('modular'))      return 'Prefabricada';
+  if (l.includes('terreno') || l.includes('parcela'))     return 'Terreno';
+  if (l.includes('oficina'))                              return 'Oficina';
+  if (l.includes('local') || l.includes('comercial'))     return 'Local Comercial';
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
 // ── Paleta ─────────────────────────────────────────────────────────────────────
 
 const COLORS = {
-  primary: '#0f4c81', secondary: '#e8927c', accent: '#2ec4b6',
-  warning: '#f4a261', error: '#e76f51', success: '#2a9d8f',
-  neutral: '#264653', bg: '#f8f9fa', cardBg: '#ffffff',
-  darkText: '#1a1a2e', mutedText: '#6c757d',
+  primary:  '#0f4c81',
+  secondary:'#e8927c',
+  accent:   '#2ec4b6',
+  warning:  '#f4a261',
+  error:    '#e76f51',
+  success:  '#2a9d8f',
+  neutral:  '#264653',
+  up:       '#16a34a',
+  down:     '#dc2626',
+  bg:       '#f8f9fa',
+  cardBg:   '#ffffff',
+  darkText: '#1a1a2e',
+  mutedText:'#6c757d',
 };
 
 const PROPERTY_TYPE_COLORS: Record<string, string> = {
-  'Departamento': '#0f4c81', 'Casa': '#2a9d8f', 'Prefabricada': '#e8927c',
-  'Terreno': '#f4a261', 'Oficina': '#264653', 'Local Comercial': '#e76f51',
-  'Bodega': '#8ecae6', 'Otro': '#adb5bd',
+  'Departamento':    '#0f4c81',
+  'Casa':            '#2a9d8f',
+  'Prefabricada':    '#e8927c',
+  'Terreno':         '#f4a261',
+  'Oficina':         '#264653',
+  'Local Comercial': '#e76f51',
+  'Bodega':          '#8ecae6',
+  'Otro':            '#adb5bd',
 };
 
-const PIE_COLORS = ['#0f4c81', '#2a9d8f', '#e8927c', '#f4a261', '#264653', '#e76f51', '#8ecae6', '#adb5bd'];
-
+const PIE_COLORS   = ['#0f4c81','#2a9d8f','#e8927c','#f4a261','#264653','#e76f51','#8ecae6','#adb5bd'];
 const EMPTY_FILTERS: Filters = { region: '', city: '', neighborhood: '', propertyType: '' };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// RADAR TOOLTIP — Muestra valores reales, NO porcentajes normalizados
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Radar Tooltip ──────────────────────────────────────────────────────────────
 
 const RadarTooltipContent = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
-
   return (
     <Paper elevation={3} sx={{ p: 1.5, minWidth: 180, border: '1px solid #e0e0e0' }}>
-      <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75, color: COLORS.darkText }}>
-        {label}
-      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75, color: COLORS.darkText }}>{label}</Typography>
       {payload.map((entry: any) => {
-        // Leer el valor REAL desde el campo "{TipoPropiedad}_real"
-        const realKey = `${entry.dataKey}_real`;
-        const realValue = entry.payload?.[realKey];
+        const realValue = entry.payload?.[`${entry.dataKey}_real`];
         return (
           <Box key={entry.dataKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
             <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: entry.color, flexShrink: 0 }} />
-            <Typography variant="caption" sx={{ color: COLORS.mutedText, minWidth: 80 }}>
-              {entry.name}:
-            </Typography>
-            <Typography variant="caption" sx={{ fontWeight: 700, color: COLORS.darkText }}>
-              {realValue ?? entry.value}
-            </Typography>
+            <Typography variant="caption" sx={{ color: COLORS.mutedText, minWidth: 80 }}>{entry.name}:</Typography>
+            <Typography variant="caption" sx={{ fontWeight: 700, color: COLORS.darkText }}>{realValue ?? entry.value}</Typography>
           </Box>
         );
       })}
@@ -151,19 +181,35 @@ const RadarTooltipContent = ({ active, payload, label }: any) => {
   );
 };
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CREDIT BAR — Barra de créditos siempre visible para usuarios base
-// ══════════════════════════════════════════════════════════════════════════════
+// ── Price History Tooltip ──────────────────────────────────────────────────────
+
+const PriceHistoryTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <Paper elevation={3} sx={{ p: 1.5, minWidth: 200, border: '1px solid #e0e0e0' }}>
+      <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>{label}</Typography>
+      {payload.map((entry: any) => (
+        <Box key={entry.dataKey} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, mb: 0.4 }}>
+          <Typography variant="caption" sx={{ color: entry.color }}>{entry.name}:</Typography>
+          <Typography variant="caption" sx={{ fontWeight: 700 }}>
+            {entry.dataKey === 'count'
+              ? entry.value.toLocaleString('es-CL')
+              : formatCLP(entry.value)}
+          </Typography>
+        </Box>
+      ))}
+    </Paper>
+  );
+};
+
+// ── Credit Bar ─────────────────────────────────────────────────────────────────
 
 function CreditBar({ credits, plan, role }: { credits: number; plan: string; role: string }) {
-  // Admins y pro no ven la barra
   if (plan === 'pro' || role === 'admin') {
     return (
-      <Paper elevation={0} sx={{
-        px: 2.5, py: 1.5, mb: 3, borderRadius: 2,
+      <Paper elevation={0} sx={{ px: 2.5, py: 1.5, mb: 3, borderRadius: 2,
         display: 'flex', alignItems: 'center', gap: 1.5,
-        bgcolor: '#f0fdf4', border: '1px solid #bbf7d0',
-      }}>
+        bgcolor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
         <StarIcon sx={{ color: '#16a34a', fontSize: 20 }} />
         <Typography variant="body2" sx={{ color: '#15803d', fontWeight: 600 }}>
           {role === 'admin' ? 'Admin — Consultas ilimitadas' : 'Plan Pro — Consultas ilimitadas'}
@@ -171,35 +217,25 @@ function CreditBar({ credits, plan, role }: { credits: number; plan: string; rol
       </Paper>
     );
   }
-
-  // Plan base: mostrar barra de créditos
-  const percentage = Math.max(0, Math.min(100, (credits / INITIAL_CREDITS) * 100));
-  const isLow = credits <= 10;
-  const isEmpty = credits <= 0;
-
-  const barColor = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#3b82f6';
-  const bgColor = isEmpty ? '#fef2f2' : isLow ? '#fffbeb' : '#eff6ff';
+  const percentage  = Math.max(0, Math.min(100, (credits / INITIAL_CREDITS) * 100));
+  const isLow       = credits <= 10;
+  const isEmpty     = credits <= 0;
+  const barColor    = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#3b82f6';
+  const bgColor     = isEmpty ? '#fef2f2' : isLow ? '#fffbeb' : '#eff6ff';
   const borderColor = isEmpty ? '#fecaca' : isLow ? '#fde68a' : '#bfdbfe';
-  const textColor = isEmpty ? '#991b1b' : isLow ? '#92400e' : '#1e40af';
+  const textColor   = isEmpty ? '#991b1b' : isLow ? '#92400e' : '#1e40af';
 
   return (
-    <Paper elevation={0} sx={{
-      px: 2.5, py: 1.5, mb: 3, borderRadius: 2,
-      bgcolor: bgColor, border: `1px solid ${borderColor}`,
-    }}>
+    <Paper elevation={0} sx={{ px: 2.5, py: 1.5, mb: 3, borderRadius: 2, bgcolor: bgColor, border: `1px solid ${borderColor}` }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TokenIcon sx={{ color: barColor, fontSize: 20 }} />
           <Typography variant="body2" sx={{ fontWeight: 700, color: textColor }}>
-            {isEmpty
-              ? 'Sin créditos disponibles'
-              : `${credits} crédito${credits !== 1 ? 's' : ''} restante${credits !== 1 ? 's' : ''}`}
+            {isEmpty ? 'Sin créditos disponibles' : `${credits} crédito${credits !== 1 ? 's' : ''} restante${credits !== 1 ? 's' : ''}`}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
-            {credits} / {INITIAL_CREDITS}
-          </Typography>
+          <Typography variant="caption" sx={{ color: COLORS.mutedText }}>{credits} / {INITIAL_CREDITS}</Typography>
           {isEmpty && (
             <Button size="small" variant="contained"
               sx={{ textTransform: 'none', fontSize: '0.75rem', fontWeight: 700, px: 2, py: 0.25,
@@ -213,15 +249,9 @@ function CreditBar({ credits, plan, role }: { credits: number; plan: string; rol
           )}
         </Box>
       </Box>
-      <LinearProgress
-        variant="determinate"
-        value={percentage}
-        sx={{
-          height: 6, borderRadius: 3,
-          bgcolor: `${barColor}20`,
-          '& .MuiLinearProgress-bar': { borderRadius: 3, bgcolor: barColor },
-        }}
-      />
+      <LinearProgress variant="determinate" value={percentage}
+        sx={{ height: 6, borderRadius: 3, bgcolor: `${barColor}20`,
+              '& .MuiLinearProgress-bar': { borderRadius: 3, bgcolor: barColor } }} />
       <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>
         Cada consulta al dashboard (filtros, actualización) consume 1 crédito.
         {!isEmpty && isLow && ' Considera actualizar a Pro para consultas ilimitadas.'}
@@ -230,29 +260,30 @@ function CreditBar({ credits, plan, role }: { credits: number; plan: string; rol
   );
 }
 
-// ── Componente principal ───────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// COMPONENTE PRINCIPAL
+// ══════════════════════════════════════════════════════════════════════════════
 
 export default function Dashboard() {
   const router = useRouter();
   const { user, logout, refreshCredits, isPro, isAdmin } = useAuth();
 
   // ── Estado ──────────────────────────────────────────────────────
-  const [bots, setBots] = useState<Bot[]>([]);
-  const [marketData, setMarketData] = useState<MarketData | null>(null);
-  const [trendsData, setTrendsData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filtersLoading, setFiltersLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [priceFilter, setPriceFilter] = useState<'auto' | 'CLP' | 'UF'>('auto');
-  const [noCredits, setNoCredits] = useState(false);
+  const [marketData,    setMarketData]    = useState<MarketData | null>(null);
+  const [trackingStats, setTrackingStats] = useState<TrackingStats | null>(null);
+  const [priceChanges,  setPriceChanges]  = useState<PriceChangeItem[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [filtersLoading,setFiltersLoading]= useState(true);
+  const [error,         setError]         = useState<string | null>(null);
+  const [priceFilter,   setPriceFilter]   = useState<'auto' | 'CLP' | 'UF'>('auto');
+  const [noCredits,     setNoCredits]     = useState(false);
 
   const [locations, setLocations] = useState<Locations>({
     regions: [], cities: [], neighborhoods: [], propertyTypes: [],
   });
-
-  const [staged, setStaged] = useState<Filters>(EMPTY_FILTERS);
+  const [staged,    setStaged]    = useState<Filters>(EMPTY_FILTERS);
   const [committed, setCommitted] = useState<Filters>(EMPTY_FILTERS);
-  const [filteredCities, setFilteredCities] = useState<string[]>([]);
+  const [filteredCities,        setFilteredCities]        = useState<string[]>([]);
   const [filteredNeighborhoods, setFilteredNeighborhoods] = useState<string[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -264,36 +295,30 @@ export default function Dashboard() {
 
   // Cascada de filtros
   useEffect(() => {
-    if (!staged.region) {
-      setFilteredCities(locations.cities);
-      setFilteredNeighborhoods(locations.neighborhoods);
-      return;
-    }
+    if (!staged.region) { setFilteredCities(locations.cities); setFilteredNeighborhoods(locations.neighborhoods); return; }
     const load = async () => {
       try {
-        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
-          params: { region: staged.region }, headers: authHeaders(),
-        });
+        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`,
+          { params: { region: staged.region }, headers: authHeaders() });
         setFilteredCities(data.cities);
         setFilteredNeighborhoods(data.neighborhoods);
       } catch { /* fallback */ }
     };
     load();
-    setStaged((prev) => ({ ...prev, city: '', neighborhood: '' }));
+    setStaged((p) => ({ ...p, city: '', neighborhood: '' }));
   }, [staged.region]);
 
   useEffect(() => {
     if (!staged.city) { setFilteredNeighborhoods(locations.neighborhoods); return; }
     const load = async () => {
       try {
-        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`, {
-          params: { region: staged.region || undefined, city: staged.city }, headers: authHeaders(),
-        });
+        const { data } = await axios.get(`${API_BASE_URL}/api/analytics/locations`,
+          { params: { region: staged.region || undefined, city: staged.city }, headers: authHeaders() });
         setFilteredNeighborhoods(data.neighborhoods);
       } catch { /* fallback */ }
     };
     load();
-    setStaged((prev) => ({ ...prev, neighborhood: '' }));
+    setStaged((p) => ({ ...p, neighborhood: '' }));
   }, [staged.city]);
 
   useEffect(() => {
@@ -317,8 +342,8 @@ export default function Dashboard() {
     let creditsDepleted = false;
 
     const params: Record<string, string> = {};
-    if (committed.region)       params.region = committed.region;
-    if (committed.city)         params.city = committed.city;
+    if (committed.region)       params.region       = committed.region;
+    if (committed.city)         params.city         = committed.city;
     if (committed.neighborhood) params.neighborhood = committed.neighborhood;
     if (committed.propertyType) params.propertyType = committed.propertyType;
 
@@ -326,13 +351,12 @@ export default function Dashboard() {
 
     try {
       const results = await Promise.allSettled([
-        axios.get(`${API_BASE_URL}/api/bots`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API_BASE_URL}/api/analytics/market`, { params, headers }),
-        axios.get(`${API_BASE_URL}/api/analytics/trends`, { params, headers }),
+        axios.get(`${API_BASE_URL}/api/analytics/market`,          { params, headers }),
+        axios.get(`${API_BASE_URL}/api/properties/tracking-stats`, { params, headers }),
+        axios.get(`${API_BASE_URL}/api/properties/price-changes`,  { params: { ...params, limit: 10 }, headers }),
       ]);
 
-      const [botsResult, marketResult, trendsResult] = results;
-      setBots(botsResult.status === 'fulfilled' ? toArray(botsResult.value.data) : []);
+      const [marketResult, trackingResult, priceChangesResult] = results;
 
       if (marketResult.status === 'rejected') {
         const err = (marketResult as PromiseRejectedResult).reason;
@@ -346,9 +370,13 @@ export default function Dashboard() {
         refreshCredits();
       }
 
-      if (trendsResult.status === 'fulfilled') {
-        const d = trendsResult.value.data;
-        setTrendsData(toArray(d?.items || d?.data || d?.trends || d));
+      if (trackingResult.status === 'fulfilled') {
+        setTrackingStats(trackingResult.value.data || null);
+      }
+
+      if (priceChangesResult.status === 'fulfilled') {
+        const d = priceChangesResult.value.data;
+        setPriceChanges(toArray(d?.items || d?.data || d));
       }
 
       if (!creditsDepleted && results.some((r) => r.status === 'rejected'))
@@ -366,112 +394,84 @@ export default function Dashboard() {
   const activeFilterCount = Object.values(staged).filter(Boolean).length;
   const clearFilters = () => { setStaged(EMPTY_FILTERS); setCommitted(EMPTY_FILTERS); };
 
-  // ── Datos derivados ───────────────────────────────────────────
+  // ── Datos derivados ────────────────────────────────────────────
   const propertyTypeStats = useMemo(() =>
     (marketData?.byType ?? []).map((t) => ({
       ...t,
-      type: normalizePropertyType(t.type),
+      type:  normalizePropertyType(t.type),
       color: PROPERTY_TYPE_COLORS[normalizePropertyType(t.type)] || '#adb5bd',
     })).sort((a, b) => b.count - a.count),
     [marketData]);
 
   const globalAverages = useMemo(() => ({
-    avgBedrooms: marketData?.globalAverages?.avgBedrooms ?? 0,
+    avgBedrooms:  marketData?.globalAverages?.avgBedrooms  ?? 0,
     avgBathrooms: marketData?.globalAverages?.avgBathrooms ?? 0,
-    avgArea: marketData?.globalAverages?.avgArea ?? 0,
-    avgPrice: marketData?.globalAverages?.avgPrice ?? 0,
+    avgArea:      marketData?.globalAverages?.avgArea      ?? 0,
+    avgPrice:     marketData?.globalAverages?.avgPrice     ?? 0,
   }), [marketData]);
 
   const priceDistribution = useMemo(() => {
     if (!marketData) return { currency: 'UF', data: [] };
-    const uf = toArray(marketData.priceDistribution?.uf);
+    const uf  = toArray(marketData.priceDistribution?.uf);
     const clp = toArray(marketData.priceDistribution?.clp);
     if (priceFilter === 'CLP') return { currency: 'CLP', data: clp };
-    if (priceFilter === 'UF') return { currency: 'UF', data: uf };
+    if (priceFilter === 'UF')  return { currency: 'UF',  data: uf };
     return uf.length >= clp.length ? { currency: 'UF', data: uf } : { currency: 'CLP', data: clp };
   }, [marketData, priceFilter]);
 
-  const topNeighborhoods = useMemo(() => toArray(marketData?.topNeighborhoods).slice(0, 10), [marketData]);
+  const topNeighborhoods  = useMemo(() => toArray(marketData?.topNeighborhoods).slice(0, 10), [marketData]);
   const propertySourceData = useMemo(() => toArray(marketData?.sources).filter((s) => s.value > 0), [marketData]);
-  const botStatusData = useMemo(() => [
-    { name: 'Activos', value: bots.filter((b) => b.isActive).length },
-    { name: 'Inactivos', value: bots.filter((b) => !b.isActive).length },
-  ], [bots]);
-  const executionData = useMemo(() =>
-    trendsData.map((item: any) => ({
-      mes: item.mes || item.month || '?',
-      exitosas: item.exitosas ?? 0,
-      fallidas: item.fallidas ?? 0,
-    })), [trendsData]);
+
+  // Price history con fallback
+  const priceHistory = useMemo(() =>
+    toArray(trackingStats?.priceHistory).map((item: any) => ({
+      mes:      item.mes || item.month || '?',
+      avgPrice: item.avgPrice ?? 0,
+      count:    item.count    ?? 0,
+      minPrice: item.minPrice ?? 0,
+      maxPrice: item.maxPrice ?? 0,
+    })),
+    [trackingStats]);
 
   const radarTypes = useMemo(() =>
     propertyTypeStats.filter((t) => ['Departamento', 'Casa', 'Prefabricada'].includes(t.type)),
     [propertyTypeStats]);
 
-  // ══════════════════════════════════════════════════════════════════
-  // FIX RADAR: Normalización 0-100 para ejes + valores reales en _real
-  //
-  // El RadarChart de recharts necesita que todas las métricas estén
-  // en la misma escala (0-100) para que el pentágono tenga sentido.
-  // PERO el tooltip debe mostrar los valores reales.
-  //
-  // Solución: cada fila tiene:
-  //   row["Casa"] = 100          → para el gráfico (normalizado)
-  //   row["Casa_real"] = "3.0"   → para el tooltip (valor humano)
-  // ══════════════════════════════════════════════════════════════════
   const radarData = useMemo(() => {
     if (radarTypes.length === 0) return [];
-
-    const maxBedrooms  = Math.max(...radarTypes.map((t) => t.avgBedrooms ?? 0), 1);
+    const maxBedrooms  = Math.max(...radarTypes.map((t) => t.avgBedrooms  ?? 0), 1);
     const maxBathrooms = Math.max(...radarTypes.map((t) => t.avgBathrooms ?? 0), 1);
-    const maxArea      = Math.max(...radarTypes.map((t) => t.avgArea ?? 0), 1);
-    const maxPrice     = Math.max(...radarTypes.map((t) => t.avgPrice ?? 0), 1);
+    const maxArea      = Math.max(...radarTypes.map((t) => t.avgArea      ?? 0), 1);
+    const maxPrice     = Math.max(...radarTypes.map((t) => t.avgPrice     ?? 0), 1);
     const maxCount     = Math.max(...radarTypes.map((t) => t.count), 1);
 
-    const metrics = [
+    return [
       { metric: 'Dormitorios', key: 'avgBedrooms',  max: maxBedrooms  },
       { metric: 'Baños',       key: 'avgBathrooms', max: maxBathrooms },
       { metric: 'Superficie',  key: 'avgArea',      max: maxArea      },
       { metric: 'Precio',      key: 'avgPrice',     max: maxPrice     },
       { metric: 'Cantidad',    key: 'count',        max: maxCount     },
-    ];
-
-    return metrics.map((m) => {
+    ].map((m) => {
       const row: any = { metric: m.metric };
-
       radarTypes.forEach((t) => {
         const rawValue = (t as any)[m.key] ?? 0;
-
-        // Valor normalizado (0-100) → lo que dibuja el gráfico
         row[t.type] = Math.round((rawValue / m.max) * 100);
-
-        // Valor REAL → lo que muestra el tooltip
         switch (m.key) {
-          case 'avgPrice':
-            row[`${t.type}_real`] = formatCLP(rawValue);
-            break;
-          case 'avgArea':
-            row[`${t.type}_real`] = `${rawValue.toFixed(1)} m²`;
-            break;
+          case 'avgPrice':    row[`${t.type}_real`] = formatCLP(rawValue); break;
+          case 'avgArea':     row[`${t.type}_real`] = `${rawValue.toFixed(1)} m²`; break;
           case 'avgBedrooms':
-          case 'avgBathrooms':
-            row[`${t.type}_real`] = rawValue.toFixed(1);
-            break;
-          case 'count':
-            row[`${t.type}_real`] = rawValue.toLocaleString('es-CL');
-            break;
-          default:
-            row[`${t.type}_real`] = rawValue;
+          case 'avgBathrooms':row[`${t.type}_real`] = rawValue.toFixed(1); break;
+          case 'count':       row[`${t.type}_real`] = rawValue.toLocaleString('es-CL'); break;
+          default:            row[`${t.type}_real`] = rawValue;
         }
       });
-
       return row;
     });
   }, [radarTypes]);
 
   const totalProperties = marketData?.totalProperties ?? 0;
 
-  // ── Sub-componentes ───────────────────────────────────────────
+  // ── Sub-componentes ──────────────────────────────────────────────
 
   const StatCard = ({ title, value, icon, color, subtitle }: {
     title: string; value: string | number; icon: React.ReactNode; color: string; subtitle?: string;
@@ -495,9 +495,7 @@ export default function Dashboard() {
           : <Typography variant="h4" sx={{ fontWeight: 700, color: COLORS.darkText, letterSpacing: '-0.5px' }}>{value}</Typography>
         }
         {subtitle && (
-          <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>
-            {subtitle}
-          </Typography>
+          <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>{subtitle}</Typography>
         )}
       </CardContent>
     </Card>
@@ -522,7 +520,7 @@ export default function Dashboard() {
     </Box>
   );
 
-  // ── Render ───────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
@@ -586,28 +584,19 @@ export default function Dashboard() {
 
       {error && <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
 
-      {/* ═══════════════════════════════════════════════════════════
-          CREDIT BAR — Siempre visible
-          ═══════════════════════════════════════════════════════════ */}
-      {user && (
-        <CreditBar credits={user.credits} plan={user.plan} role={user.role} />
-      )}
+      {user && <CreditBar credits={user.credits} plan={user.plan} role={user.role} />}
 
       {/* ─── Panel de Filtros ─── */}
       <ChartPaper sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
           <FilterListIcon sx={{ color: COLORS.primary }} />
-          <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText, flex: 1 }}>
-            Filtros de Ubicación
-          </Typography>
+          <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText, flex: 1 }}>Filtros de Ubicación</Typography>
           {activeFilterCount > 0 && (
-            <Button size="small" startIcon={<ClearIcon />} onClick={clearFilters}
-              sx={{ textTransform: 'none', color: COLORS.mutedText }}>
+            <Button size="small" startIcon={<ClearIcon />} onClick={clearFilters} sx={{ textTransform: 'none', color: COLORS.mutedText }}>
               Limpiar filtros
             </Button>
           )}
         </Box>
-
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2 }}>
           <FormControl size="small" fullWidth>
             <InputLabel>Región</InputLabel>
@@ -647,11 +636,10 @@ export default function Dashboard() {
             </Select>
           </FormControl>
         </Box>
-
         {activeFilterCount > 0 && (
           <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-            {staged.region && <Chip size="small" label={`Región: ${staged.region}`} onDelete={() => setStaged((p) => ({ ...p, region: '' }))} color="primary" variant="outlined" />}
-            {staged.city && <Chip size="small" label={`Ciudad: ${staged.city}`} onDelete={() => setStaged((p) => ({ ...p, city: '' }))} color="primary" variant="outlined" />}
+            {staged.region       && <Chip size="small" label={`Región: ${staged.region}`}       onDelete={() => setStaged((p) => ({ ...p, region: '' }))}       color="primary" variant="outlined" />}
+            {staged.city         && <Chip size="small" label={`Ciudad: ${staged.city}`}         onDelete={() => setStaged((p) => ({ ...p, city: '' }))}         color="primary" variant="outlined" />}
             {staged.neighborhood && <Chip size="small" label={`Comuna: ${staged.neighborhood}`} onDelete={() => setStaged((p) => ({ ...p, neighborhood: '' }))} color="primary" variant="outlined" />}
             {staged.propertyType && <Chip size="small" label={`Tipo: ${normalizePropertyType(staged.propertyType)}`} onDelete={() => setStaged((p) => ({ ...p, propertyType: '' }))} color="primary" variant="outlined" />}
           </Box>
@@ -660,19 +648,208 @@ export default function Dashboard() {
 
       {/* ─── KPI Cards ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(6, 1fr)' }, gap: 2, mb: 4 }}>
-        <StatCard title="Total Propiedades" value={totalProperties.toLocaleString('es-CL')} icon={<HomeIcon />} color={COLORS.primary} />
-        <StatCard title="Bots Activos" value={`${botStatusData[0]?.value || 0} / ${bots.length}`} icon={<TrendingUpIcon />} color={COLORS.success} />
-        <StatCard title="Prom. Dormitorios" value={globalAverages.avgBedrooms ? globalAverages.avgBedrooms.toFixed(1) : '—'} icon={<BedIcon />} color="#7c3aed" subtitle="Por propiedad" />
-        <StatCard title="Prom. Baños" value={globalAverages.avgBathrooms ? globalAverages.avgBathrooms.toFixed(1) : '—'} icon={<BathtubIcon />} color={COLORS.secondary} subtitle="Por propiedad" />
-        <StatCard title="Prom. Superficie" value={globalAverages.avgArea > 0 ? `${Math.round(globalAverages.avgArea)} m²` : '—'} icon={<SquareFootIcon />} color={COLORS.accent} subtitle="Metros cuadrados" />
-        <StatCard title="Tipos Detectados" value={propertyTypeStats.length} icon={<ApartmentIcon />} color={COLORS.warning} subtitle={propertyTypeStats.slice(0, 2).map((t) => t.type).join(', ')} />
+        <StatCard title="Total Propiedades" value={totalProperties.toLocaleString('es-CL')} icon={<HomeIcon />}       color={COLORS.primary} />
+        <StatCard title="Tipos Detectados"  value={propertyTypeStats.length}                icon={<ApartmentIcon />}  color={COLORS.warning} subtitle={propertyTypeStats.slice(0, 2).map((t) => t.type).join(', ')} />
+        <StatCard title="Prom. Dormitorios" value={globalAverages.avgBedrooms  ? globalAverages.avgBedrooms.toFixed(1)  : '—'} icon={<BedIcon />}         color="#7c3aed" subtitle="Por propiedad" />
+        <StatCard title="Prom. Baños"       value={globalAverages.avgBathrooms ? globalAverages.avgBathrooms.toFixed(1) : '—'} icon={<BathtubIcon />}     color={COLORS.secondary} subtitle="Por propiedad" />
+        <StatCard title="Prom. Superficie"  value={globalAverages.avgArea > 0  ? `${Math.round(globalAverages.avgArea)} m²` : '—'} icon={<SquareFootIcon />}  color={COLORS.accent}   subtitle="Metros cuadrados" />
+        <StatCard title="Precio Promedio"   value={globalAverages.avgPrice > 0 ? formatCLP(globalAverages.avgPrice) : '—'} icon={<AttachMoneyIcon />} color={COLORS.success}  subtitle="Precio de mercado" />
+      </Box>
+
+      {/* ══════════════════════════════════════════════════════════════
+          SECCIÓN TRACKING: KPIs de historial de propiedades
+          ══════════════════════════════════════════════════════════════ */}
+      <ChartPaper sx={{ mb: 3 }}>
+        <SectionHeader title="Seguimiento y Cambios de Propiedades" icon={<TimelineIcon />} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2 }}>
+          {[
+            {
+              label:    'Nuevas (última ejecución)',
+              value:    trackingStats?.newProperties ?? '—',
+              icon:     <NewReleasesIcon />,
+              color:    '#2563eb',
+              bg:       '#eff6ff',
+              border:   '#bfdbfe',
+            },
+            {
+              label:    'Cambios de precio detectados',
+              value:    trackingStats?.priceChanges ?? '—',
+              icon:     <ChangeCircleIcon />,
+              color:    '#d97706',
+              bg:       '#fffbeb',
+              border:   '#fde68a',
+            },
+            {
+              label:    'Despublicadas / eliminadas',
+              value:    trackingStats?.delisted ?? '—',
+              icon:     <VisibilityOffIcon />,
+              color:    '#dc2626',
+              bg:       '#fef2f2',
+              border:   '#fecaca',
+            },
+            {
+              label:    'Sin cambios',
+              value:    trackingStats?.unchanged ?? '—',
+              icon:     <NotificationsActiveIcon />,
+              color:    '#16a34a',
+              bg:       '#f0fdf4',
+              border:   '#bbf7d0',
+            },
+          ].map((item) => (
+            <Paper key={item.label} elevation={0}
+              sx={{ p: 2, borderRadius: 2, bgcolor: item.bg, border: `1px solid ${item.border}`,
+                    transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <Box sx={{ color: item.color, display: 'flex' }}>{item.icon}</Box>
+                <Typography variant="caption" sx={{ color: item.color, fontWeight: 600, fontSize: '0.75rem' }}>
+                  {item.label}
+                </Typography>
+              </Box>
+              {loading
+                ? <Skeleton width="50%" height={36} />
+                : <Typography variant="h4" sx={{ fontWeight: 800, color: item.color, letterSpacing: '-1px' }}>
+                    {typeof item.value === 'number' ? item.value.toLocaleString('es-CL') : item.value}
+                  </Typography>
+              }
+            </Paper>
+          ))}
+        </Box>
+      </ChartPaper>
+
+      {/* ══════════════════════════════════════════════════════════════
+          PRECIO: Evolución temporal (gráfico principal)
+          ══════════════════════════════════════════════════════════════ */}
+      <ChartPaper sx={{ mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AttachMoneyIcon sx={{ color: COLORS.primary }} />
+            <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText }}>
+              Evolución del Precio Promedio
+            </Typography>
+          </Box>
+          <Chip label="Histórico mensual" size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600 }} />
+        </Box>
+        {loading ? <Skeleton variant="rectangular" height={320} sx={{ borderRadius: 2 }} /> :
+         priceHistory.length === 0 ? (
+          <EmptyState message="Sin historial de precios. Los datos aparecerán tras varias ejecuciones de los bots." />
+        ) : (
+          <ResponsiveContainer width="100%" height={320}>
+            <ComposedChart data={priceHistory}>
+              <defs>
+                <linearGradient id="gradPrice" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={COLORS.primary} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0}    />
+                </linearGradient>
+                <linearGradient id="gradCount" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={COLORS.accent} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={COLORS.accent} stopOpacity={0}   />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="price" orientation="left"  tick={{ fontSize: 11 }} tickFormatter={(v) => formatCLP(v)} />
+              <YAxis yAxisId="count" orientation="right" tick={{ fontSize: 11 }} />
+              <RechartTooltip content={<PriceHistoryTooltip />} />
+              <Legend />
+              <Area  yAxisId="price" type="monotone" dataKey="avgPrice" stroke={COLORS.primary} fill="url(#gradPrice)" strokeWidth={2.5} name="Precio promedio" dot={{ r: 4, fill: COLORS.primary }} />
+              <Bar   yAxisId="count" dataKey="count" fill={COLORS.accent} fillOpacity={0.35} radius={[3, 3, 0, 0]} name="Propiedades" />
+              {priceHistory[0]?.minPrice !== undefined && (
+                <Line yAxisId="price" type="monotone" dataKey="minPrice" stroke="#94a3b8" strokeDasharray="4 2" strokeWidth={1.5} dot={false} name="Precio mínimo" />
+              )}
+              {priceHistory[0]?.maxPrice !== undefined && (
+                <Line yAxisId="price" type="monotone" dataKey="maxPrice" stroke="#f97316" strokeDasharray="4 2" strokeWidth={1.5} dot={false} name="Precio máximo" />
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </ChartPaper>
+
+      {/* ══════════════════════════════════════════════════════════════
+          CAMBIOS DE PRECIO RECIENTES + DISTRIBUCIÓN DE PRECIOS
+          ══════════════════════════════════════════════════════════════ */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
+
+        {/* Cambios de precio recientes */}
+        <ChartPaper>
+          <SectionHeader title="Cambios de Precio Recientes" icon={<TrendingUpIcon />} />
+          {loading ? (
+            Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} height={52} sx={{ mb: 1, borderRadius: 1 }} />)
+          ) : priceChanges.length === 0 ? (
+            <EmptyState message="Sin cambios de precio detectados recientemente" />
+          ) : (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {priceChanges.slice(0, 8).map((item, idx) => {
+                const isUp   = item.priceDiff > 0;
+                const color  = isUp ? COLORS.down : COLORS.up;
+                const bg     = isUp ? '#fef2f2' : '#f0fdf4';
+                const border = isUp ? '#fecaca' : '#bbf7d0';
+                return (
+                  <Paper key={item.id ?? idx} elevation={0}
+                    sx={{ p: 1.5, bgcolor: bg, border: `1px solid ${border}`, borderRadius: 2,
+                          transition: 'box-shadow 0.15s', '&:hover': { boxShadow: 2 } }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <Box sx={{ flex: 1, minWidth: 0, mr: 1 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.82rem',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.title}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+                          {[item.neighborhood, item.city].filter(Boolean).join(', ') || '—'}
+                          {item.propertyType && ` · ${normalizePropertyType(item.propertyType)}`}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ textAlign: 'right', flexShrink: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
+                          {isUp ? <TrendingUpIcon sx={{ fontSize: 16, color }} /> : <TrendingDownIcon sx={{ fontSize: 16, color }} />}
+                          <Typography variant="body2" sx={{ fontWeight: 800, color, fontSize: '0.85rem' }}>
+                            {isUp ? '+' : ''}{item.priceDiffPct?.toFixed(1)}%
+                          </Typography>
+                        </Box>
+                        <Typography variant="caption" sx={{ color: COLORS.mutedText, fontSize: '0.7rem' }}>
+                          {formatCLP(item.oldPrice)} → {formatCLP(item.newPrice)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Paper>
+                );
+              })}
+            </Box>
+          )}
+        </ChartPaper>
+
+        {/* Distribución de precios */}
+        <ChartPaper>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <SectionHeader title="Distribución de Precios" icon={<AttachMoneyIcon />} />
+            <ToggleButtonGroup value={priceFilter} exclusive onChange={(_, v) => v && setPriceFilter(v)} size="small">
+              <ToggleButton value="auto" sx={{ textTransform: 'none', px: 2 }}>Auto</ToggleButton>
+              <ToggleButton value="UF"   sx={{ textTransform: 'none', px: 2 }}>UF</ToggleButton>
+              <ToggleButton value="CLP"  sx={{ textTransform: 'none', px: 2 }}>CLP</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+          {loading ? <Skeleton variant="rectangular" height={280} /> :
+           priceDistribution.data.length === 0 ? (
+            <EmptyState message="Sin datos de precios para los filtros seleccionados" />
+          ) : (
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={priceDistribution.data} barSize={40}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="rango" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <RechartTooltip formatter={(v: number) => [`${v} propiedades`]} />
+                <Bar dataKey="cantidad" fill={COLORS.primary} radius={[4, 4, 0, 0]} name="Propiedades" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartPaper>
       </Box>
 
       {/* ─── Distribución por tipo + Radar ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <ChartPaper>
           <SectionHeader title="Distribución por Tipo" icon={<ApartmentIcon />} />
-          {loading ? <Skeleton variant="rectangular" height={280} /> : propertyTypeStats.length === 0 ? (
+          {loading ? <Skeleton variant="rectangular" height={280} /> :
+           propertyTypeStats.length === 0 ? (
             <EmptyState message="No hay propiedades para los filtros seleccionados" />
           ) : (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -683,7 +860,7 @@ export default function Dashboard() {
                     label={({ percent }) => `${(percent * 100).toFixed(0)}%`} labelLine={false}>
                     {propertyTypeStats.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
-                  <Tooltip formatter={(v: number, n: string) => [`${v} propiedades`, n]} />
+                  <RechartTooltip formatter={(v: number, n: string) => [`${v} propiedades`, n]} />
                 </PieChart>
               </ResponsiveContainer>
               <Box sx={{ flex: 1 }}>
@@ -703,13 +880,10 @@ export default function Dashboard() {
           )}
         </ChartPaper>
 
-        {/* ══════════════════════════════════════════════════════════
-            RADAR — FIX: Tooltip con RadarTooltipContent
-            Ahora muestra "Casa: 3.0" en vez de "Casa: 100"
-            ══════════════════════════════════════════════════════════ */}
         <ChartPaper>
           <SectionHeader title="Comparativa: Depto vs Casa vs Prefabricada" icon={<LocationCityIcon />} />
-          {loading ? <Skeleton variant="rectangular" height={280} /> : radarData.length === 0 ? (
+          {loading ? <Skeleton variant="rectangular" height={280} /> :
+           radarData.length === 0 ? (
             <EmptyState message="Se necesitan datos de varios tipos de propiedad" />
           ) : (
             <ResponsiveContainer width="100%" height={280}>
@@ -722,14 +896,14 @@ export default function Dashboard() {
                     stroke={t.color} fill={t.color} fillOpacity={0.15} strokeWidth={2} />
                 ))}
                 <Legend />
-                <Tooltip content={<RadarTooltipContent />} />
+                <RechartTooltip content={<RadarTooltipContent />} />
               </RadarChart>
             </ResponsiveContainer>
           )}
         </ChartPaper>
       </Box>
 
-      {/* ─── Tabla comparativa ─── */}
+      {/* ─── Tabla comparativa por tipo ─── */}
       {propertyTypeStats.length > 0 && (
         <ChartPaper sx={{ mb: 3 }}>
           <SectionHeader title="Promedios por Tipo de Propiedad" icon={<BathtubIcon />} />
@@ -747,8 +921,8 @@ export default function Dashboard() {
                   <th style={{ textAlign: 'center' }}>Prom. Dormitorios</th>
                   <th style={{ textAlign: 'center' }}>Prom. Baños</th>
                   <th style={{ textAlign: 'center' }}>Prom. m²</th>
-                  <th style={{ textAlign: 'right' }}>Precio Promedio</th>
-                  <th style={{ textAlign: 'right' }}>Rango de Precios</th>
+                  <th style={{ textAlign: 'right'  }}>Precio Promedio</th>
+                  <th style={{ textAlign: 'right'  }}>Rango de Precios</th>
                 </tr>
               </thead>
               <tbody>
@@ -761,10 +935,14 @@ export default function Dashboard() {
                       </Box>
                     </td>
                     <td style={{ textAlign: 'center' }}><Chip label={t.count} size="small" sx={{ fontWeight: 600 }} /></td>
-                    <td style={{ textAlign: 'center' }}>{t.avgBedrooms ? t.avgBedrooms.toFixed(1) : '—'}</td>
+                    <td style={{ textAlign: 'center' }}>{t.avgBedrooms  ? t.avgBedrooms.toFixed(1)  : '—'}</td>
                     <td style={{ textAlign: 'center' }}>{t.avgBathrooms ? t.avgBathrooms.toFixed(1) : '—'}</td>
                     <td style={{ textAlign: 'center' }}>{t.avgArea ? `${Math.round(t.avgArea)} m²` : '—'}</td>
-                    <td style={{ textAlign: 'right' }}><Typography variant="body2" sx={{ fontWeight: 600, color: COLORS.primary }}>{t.avgPrice ? formatCLP(t.avgPrice) : '—'}</Typography></td>
+                    <td style={{ textAlign: 'right' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: COLORS.primary }}>
+                        {t.avgPrice ? formatCLP(t.avgPrice) : '—'}
+                      </Typography>
+                    </td>
                     <td style={{ textAlign: 'right' }}>
                       <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
                         {t.minPrice ? `${formatCLP(t.minPrice)} – ${formatCLP(t.maxPrice ?? 0)}` : '—'}
@@ -778,137 +956,61 @@ export default function Dashboard() {
         </ChartPaper>
       )}
 
-      {/* ─── Distribución precios + Baños/Dormitorios ─── */}
+      {/* ─── Baños/Dormitorios + Top comunas ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <ChartPaper>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <SectionHeader title="Distribución de Precios" icon={<AttachMoneyIcon />} />
-            <ToggleButtonGroup value={priceFilter} exclusive onChange={(_, v) => v && setPriceFilter(v)} size="small">
-              <ToggleButton value="auto" sx={{ textTransform: 'none', px: 2 }}>Auto</ToggleButton>
-              <ToggleButton value="UF" sx={{ textTransform: 'none', px: 2 }}>UF</ToggleButton>
-              <ToggleButton value="CLP" sx={{ textTransform: 'none', px: 2 }}>CLP</ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-          {loading ? <Skeleton variant="rectangular" height={280} /> : priceDistribution.data.length === 0 ? (
-            <EmptyState message="Sin datos de precios para los filtros seleccionados" />
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={priceDistribution.data} barSize={40}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="rango" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number) => [`${v} propiedades`]} />
-                <Bar dataKey="cantidad" fill={COLORS.primary} radius={[4, 4, 0, 0]} name="Propiedades" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartPaper>
-
-        <ChartPaper>
           <SectionHeader title="Baños y Dormitorios por Tipo" icon={<BathtubIcon />} />
-          {loading ? <Skeleton variant="rectangular" height={280} /> : propertyTypeStats.length === 0 ? (
-            <EmptyState message="Sin datos" />
-          ) : (
+          {loading ? <Skeleton variant="rectangular" height={280} /> :
+           propertyTypeStats.length === 0 ? <EmptyState message="Sin datos" /> : (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={propertyTypeStats.slice(0, 6)} barGap={4}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="type" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <RechartTooltip />
                 <Legend />
-                <Bar dataKey="avgBedrooms" fill={COLORS.primary} name="Prom. Dormitorios" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="avgBathrooms" fill={COLORS.secondary} name="Prom. Baños" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="avgBedrooms"  fill={COLORS.primary}   name="Prom. Dormitorios" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="avgBathrooms" fill={COLORS.secondary} name="Prom. Baños"        radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
         </ChartPaper>
-      </Box>
 
-      {/* ─── Top comunas + Ejecuciones ─── */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 3, mb: 3 }}>
         <ChartPaper>
           <SectionHeader title="Top Comunas / Ciudades" icon={<LocationCityIcon />} />
-          {loading ? <Skeleton variant="rectangular" height={300} /> : topNeighborhoods.length === 0 ? (
-            <EmptyState message="Sin datos de ubicación" />
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
+          {loading ? <Skeleton variant="rectangular" height={280} /> :
+           topNeighborhoods.length === 0 ? <EmptyState message="Sin datos de ubicación" /> : (
+            <ResponsiveContainer width="100%" height={280}>
               <BarChart data={topNeighborhoods} layout="vertical" barSize={16}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                <Tooltip />
+                <RechartTooltip />
                 <Bar dataKey="count" fill={COLORS.accent} name="Propiedades" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
         </ChartPaper>
-
-        <ChartPaper>
-          <SectionHeader title="Ejecuciones Mensuales" icon={<TrendingUpIcon />} />
-          {loading ? <Skeleton variant="rectangular" height={300} /> : executionData.length === 0 ? (
-            <EmptyState message="Sin datos de ejecuciones" />
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={executionData}>
-                <defs>
-                  <linearGradient id="gradSuccess" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={COLORS.success} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="gradError" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={COLORS.error} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={COLORS.error} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Legend />
-                <Area type="monotone" dataKey="exitosas" stroke={COLORS.success} fill="url(#gradSuccess)" strokeWidth={2} name="Exitosas" />
-                <Area type="monotone" dataKey="fallidas" stroke={COLORS.error} fill="url(#gradError)" strokeWidth={2} name="Fallidas" />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </ChartPaper>
       </Box>
 
-      {/* ─── Fuentes + Estado bots ─── */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '2fr 1fr' }, gap: 3 }}>
-        <ChartPaper>
-          <SectionHeader title="Propiedades por Fuente" />
-          {loading ? <Skeleton variant="rectangular" height={280} /> : propertySourceData.length === 0 ? (
-            <EmptyState message="Sin datos de fuentes" />
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={propertySourceData} barSize={40}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill={COLORS.primary} name="Propiedades" radius={[4, 4, 0, 0]}>
-                  {propertySourceData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartPaper>
-
-        <ChartPaper>
-          <SectionHeader title="Estado de Bots" />
+      {/* ─── Propiedades por Fuente ─── */}
+      <ChartPaper>
+        <SectionHeader title="Propiedades por Fuente" />
+        {loading ? <Skeleton variant="rectangular" height={280} /> :
+         propertySourceData.length === 0 ? <EmptyState message="Sin datos de fuentes" /> : (
           <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie data={botStatusData} cx="50%" cy="50%" labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                outerRadius={90} innerRadius={45} dataKey="value" paddingAngle={3}>
-                <Cell fill={COLORS.success} />
-                <Cell fill="#dee2e6" />
-              </Pie>
-              <Tooltip />
-            </PieChart>
+            <BarChart data={propertySourceData} barSize={40}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} />
+              <RechartTooltip />
+              <Bar dataKey="value" fill={COLORS.primary} name="Propiedades" radius={[4, 4, 0, 0]}>
+                {propertySourceData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+              </Bar>
+            </BarChart>
           </ResponsiveContainer>
-        </ChartPaper>
-      </Box>
+        )}
+      </ChartPaper>
     </Box>
   );
 }

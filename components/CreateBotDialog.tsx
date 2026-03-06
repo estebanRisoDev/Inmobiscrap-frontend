@@ -12,6 +12,7 @@ import SaveIcon     from '@mui/icons-material/Save';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import axios from 'axios';
 import { authHeaders } from '@/lib/auth';
+import { useAuth } from '@/context/AuthContext'; // ← AÑADIDO
 
 const API_BASE_URL = 'http://localhost:5000';
 
@@ -25,16 +26,15 @@ const BOT_SOURCES = [
   { value: 'otro',               label: 'Otro'                },
 ];
 
-// Presets de cron más comunes
 const CRON_PRESETS = [
-  { label: 'Cada hora',              value: '0 * * * *'   },
-  { label: 'Cada 6 horas',           value: '0 */6 * * *' },
-  { label: 'Cada 12 horas',          value: '0 */12 * * *'},
-  { label: 'Cada día a medianoche',  value: '0 0 * * *'   },
-  { label: 'Cada día a las 6am',     value: '0 6 * * *'   },
-  { label: 'Cada día a las 12pm',    value: '0 12 * * *'  },
-  { label: 'Cada lunes a medianoche',value: '0 0 * * 1'   },
-  { label: 'Personalizado',          value: 'custom'       },
+  { label: 'Cada hora',              value: '0 * * * *'    },
+  { label: 'Cada 6 horas',           value: '0 */6 * * *'  },
+  { label: 'Cada 12 horas',          value: '0 */12 * * *' },
+  { label: 'Cada día a medianoche',  value: '0 0 * * *'    },
+  { label: 'Cada día a las 6am',     value: '0 6 * * *'    },
+  { label: 'Cada día a las 12pm',    value: '0 12 * * *'   },
+  { label: 'Cada lunes a medianoche',value: '0 0 * * 1'    },
+  { label: 'Personalizado',          value: 'custom'        },
 ];
 
 interface CreateBotDialogProps {
@@ -60,6 +60,8 @@ interface FormErrors {
 }
 
 export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialogProps) {
+  const { user } = useAuth(); // ← AÑADIDO: obtener usuario actual
+
   const [formData, setFormData] = useState<BotFormData>({
     name:            '',
     source:          '',
@@ -75,8 +77,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
   const [apiError,     setApiError]     = useState<string | null>(null);
   const [successMsg,   setSuccessMsg]   = useState<string | null>(null);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
   const isValidCron = (expr: string): boolean => {
     const parts = expr.trim().split(/\s+/);
     if (parts.length !== 5) return false;
@@ -86,10 +86,10 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
   const validateForm = (): boolean => {
     const errs: FormErrors = {};
 
-    if (!formData.name.trim())           errs.name   = 'El nombre es requerido';
-    else if (formData.name.length < 3)   errs.name   = 'Mínimo 3 caracteres';
-    if (!formData.source)                errs.source = 'Selecciona una fuente';
-    if (!formData.url.trim())            errs.url    = 'La URL es requerida';
+    if (!formData.name.trim())         errs.name   = 'El nombre es requerido';
+    else if (formData.name.length < 3) errs.name   = 'Mínimo 3 caracteres';
+    if (!formData.source)              errs.source = 'Selecciona una fuente';
+    if (!formData.url.trim())          errs.url    = 'La URL es requerida';
     else {
       try { new URL(formData.url); }
       catch { errs.url = 'URL inválida (ej: https://ejemplo.com)'; }
@@ -157,6 +157,10 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
         isActive:        formData.isActive,
         scheduleEnabled: formData.scheduleEnabled,
         cronExpression:  formData.scheduleEnabled ? formData.cronExpression.trim() : null,
+        // ↓ FIX: el backend requiere el userId en el body.
+        // Lo ideal sería que el backend lo tome del JWT claim,
+        // pero mientras tanto lo enviamos explícitamente.
+        userId: user?.id,
       };
 
       const response = await axios.post(`${API_BASE_URL}/api/bots`, payload, {
@@ -167,16 +171,24 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
       setTimeout(() => { resetForm(); onBotCreated?.(); onClose(); }, 1500);
 
     } catch (err: any) {
-      setApiError(
-        err.response?.data?.message ??
-        (err.code === 'ERR_NETWORK' ? 'No se pudo conectar al servidor.' : 'Error al crear el bot.')
-      );
+      // Mostrar errores de validación del backend de forma legible
+      const data = err.response?.data;
+      if (data?.errors) {
+        // Formato ProblemDetails de ASP.NET: { errors: { Field: ["msg"] } }
+        const messages = Object.entries(data.errors)
+          .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
+          .join(' | ');
+        setApiError(messages);
+      } else {
+        setApiError(
+          data?.message ??
+          (err.code === 'ERR_NETWORK' ? 'No se pudo conectar al servidor.' : 'Error al crear el bot.')
+        );
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
-
-  // ── Render ─────────────────────────────────────────────────────────────────
 
   const isCustomCron = cronPreset === 'custom';
 
@@ -197,7 +209,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
 
-          {/* Fuente */}
           <FormControl fullWidth error={!!errors.source}>
             <InputLabel>Fuente *</InputLabel>
             <Select value={formData.source} label="Fuente *" onChange={handleSourceChange} disabled={isSubmitting}>
@@ -206,7 +217,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
             {errors.source && <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.5 }}>{errors.source}</Typography>}
           </FormControl>
 
-          {/* Nombre */}
           <TextField
             label="Nombre del Bot *"
             value={formData.name}
@@ -217,7 +227,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
             inputProps={{ maxLength: 200 }}
           />
 
-          {/* URL */}
           <TextField
             label="URL a Scrapear *"
             value={formData.url}
@@ -229,7 +238,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
             inputProps={{ maxLength: 2000 }}
           />
 
-          {/* Switch activo */}
           <FormControlLabel
             control={
               <Switch
@@ -249,7 +257,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
             }
           />
 
-          {/* ── Sección de programación ─────────────────────────────────── */}
           <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 2, p: 2, bgcolor: '#fafafa' }}>
             <FormControlLabel
               control={
@@ -277,8 +284,6 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
 
             <Collapse in={formData.scheduleEnabled}>
               <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-
-                {/* Selector de preset */}
                 <FormControl fullWidth size="small">
                   <InputLabel>Frecuencia</InputLabel>
                   <Select value={cronPreset} label="Frecuencia" onChange={handlePresetChange} disabled={isSubmitting}>
@@ -295,32 +300,24 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
                   </Select>
                 </FormControl>
 
-                {/* Input cron (siempre visible para que el usuario vea qué va) */}
                 <TextField
                   label="Expresión Cron"
                   value={formData.cronExpression}
                   onChange={handleChange('cronExpression')}
                   error={!!errors.cronExpression}
                   helperText={errors.cronExpression || 'Formato: minuto hora día mes díaSemana'}
-                  fullWidth
-                  size="small"
+                  fullWidth size="small"
                   disabled={isSubmitting || !isCustomCron}
                   inputProps={{ style: { fontFamily: 'monospace' } }}
                   placeholder="0 * * * *"
                 />
 
-                {/* Leyenda rápida */}
                 <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  {[
-                    { label: '* = cualquier valor', },
-                    { label: '*/n = cada n unidades', },
-                    { label: 'n = valor exacto', },
-                  ].map((t) => (
-                    <Chip key={t.label} label={t.label} size="small" variant="outlined"
+                  {['* = cualquier valor', '*/n = cada n unidades', 'n = valor exacto'].map((t) => (
+                    <Chip key={t} label={t} size="small" variant="outlined"
                       sx={{ fontSize: '0.7rem', color: 'text.secondary' }} />
                   ))}
                 </Box>
-
               </Box>
             </Collapse>
           </Box>
@@ -333,7 +330,7 @@ export function CreateBotDialog({ open, onClose, onBotCreated }: CreateBotDialog
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !user}
           startIcon={isSubmitting ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
           sx={{ minWidth: 120 }}
         >
