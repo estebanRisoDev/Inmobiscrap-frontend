@@ -31,6 +31,8 @@ import FilterListIcon    from '@mui/icons-material/FilterList';
 import ClearIcon         from '@mui/icons-material/Clear';
 import MapIcon           from '@mui/icons-material/Map';
 import ArrowBackIcon     from '@mui/icons-material/ArrowBack';
+import DownloadIcon      from '@mui/icons-material/Download';
+import PictureAsPdfIcon  from '@mui/icons-material/PictureAsPdf';
 import LogoutIcon        from '@mui/icons-material/Logout';
 import StarIcon          from '@mui/icons-material/Star';
 import SmartToyIcon      from '@mui/icons-material/SmartToy';
@@ -66,7 +68,7 @@ interface Filters {
 interface MarketData {
   totalProperties: number;
   byType: Array<{
-    type: string; count: number;
+    type: string; count: number; currency?: string;
     avgPrice?: number; avgBedrooms?: number; avgBathrooms?: number; avgArea?: number;
     minPrice?: number; maxPrice?: number;
   }>;
@@ -79,13 +81,17 @@ interface MarketData {
   sources: Array<{ name: string; value: number }>;
 }
 
+type PriceHistoryPoint = { mes: string; avgPrice: number; count: number; minPrice?: number; maxPrice?: number };
+
 interface TrackingStats {
   totalTracked: number;
   newProperties: number;
   priceChanges: number;
   delisted: number;
   unchanged: number;
-  priceHistory?: Array<{ mes: string; avgPrice: number; count: number; minPrice?: number; maxPrice?: number }>;
+  priceHistory?:    PriceHistoryPoint[];
+  priceHistoryCLP?: PriceHistoryPoint[];
+  priceHistoryUF?:  PriceHistoryPoint[];
   priceChangeBreakdown?: Array<{ label: string; value: number }>;
 }
 
@@ -115,6 +121,14 @@ const formatCLP = (value: number | undefined | null) => {
   if (value >= 1_000)         return `$${(value / 1_000).toFixed(0)}K`;
   return `$${value.toLocaleString('es-CL')}`;
 };
+
+const formatUF = (value: number | undefined | null) => {
+  if (value == null || isNaN(value)) return '—';
+  return `${value.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} UF`;
+};
+
+const formatPrice = (value: number | undefined | null, currency?: string) =>
+  (currency ?? '').toUpperCase() === 'UF' ? formatUF(value) : formatCLP(value);
 
 const normalizePropertyType = (type?: string): string => {
   if (!type) return 'Otro';
@@ -276,7 +290,10 @@ export default function Dashboard() {
   const [filtersLoading,setFiltersLoading]= useState(true);
   const [error,         setError]         = useState<string | null>(null);
   const [priceFilter,   setPriceFilter]   = useState<'auto' | 'CLP' | 'UF'>('auto');
-  const [noCredits,     setNoCredits]     = useState(false);
+  const [priceHistoryCurrency, setPriceHistoryCurrency] = useState<'auto' | 'CLP' | 'UF'>('auto');
+  const [noCredits,         setNoCredits]         = useState(false);
+  const [reportDownloading, setReportDownloading] = useState(false);
+  const [reportError,       setReportError]       = useState<string | null>(null);
 
   const [locations, setLocations] = useState<Locations>({
     regions: [], cities: [], neighborhoods: [], propertyTypes: [],
@@ -376,7 +393,21 @@ export default function Dashboard() {
 
       if (priceChangesResult.status === 'fulfilled') {
         const d = priceChangesResult.value.data;
-        setPriceChanges(toArray(d?.items || d?.data || d));
+        const rawItems = toArray(d?.items || d?.data || d);
+        setPriceChanges(rawItems.map((item: any) => ({
+          id:           item.id,
+          title:        item.title,
+          neighborhood: item.neighborhood,
+          city:         item.city,
+          propertyType: item.propertyType,
+          currency:     item.currency,
+          changedAt:    item.priceChangedAt ?? item.changedAt,
+          url:          item.sourceUrl ?? item.url,
+          oldPrice:     item.previousPrice ?? item.oldPrice ?? 0,
+          newPrice:     item.currentPrice  ?? item.newPrice  ?? 0,
+          priceDiff:    item.priceChange   ?? item.priceDiff ?? 0,
+          priceDiffPct: item.changePercent ?? item.priceDiffPct ?? 0,
+        })));
       }
 
       if (!creditsDepleted && results.some((r) => r.status === 'rejected'))
@@ -389,6 +420,49 @@ export default function Dashboard() {
   }, [committed]);
 
   useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
+
+  // ── Descarga de informe PDF ────────────────────────────────────
+  const downloadReport = useCallback(async () => {
+    setReportDownloading(true);
+    setReportError(null);
+
+    const params = new URLSearchParams();
+    if (committed.region)       params.set('region',       committed.region);
+    if (committed.city)         params.set('city',         committed.city);
+    if (committed.neighborhood) params.set('neighborhood', committed.neighborhood);
+    if (committed.propertyType) params.set('propertyType', committed.propertyType);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/reports/market?${params.toString()}`,
+        { headers: authHeaders() as HeadersInit }
+      );
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.message ?? `Error ${response.status}`);
+      }
+
+      const blob = await response.blob();
+
+      // Leer nombre del archivo desde Content-Disposition si el backend lo envía
+      const disposition = response.headers.get('content-disposition') ?? '';
+      const match        = disposition.match(/filename[^;=\n]*=((['""]).*?\2|[^;\n]*)/);
+      const filename     = match?.[1]?.replace(/['"]/g, '') ?? 'informe-inmobiliario.pdf';
+
+      // Trigger de descarga del navegador
+      const url  = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href  = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setReportError(err?.message ?? 'No se pudo generar el informe.');
+    } finally {
+      setReportDownloading(false);
+    }
+  }, [committed]);
 
   // ── Helpers ────────────────────────────────────────────────────
   const activeFilterCount = Object.values(staged).filter(Boolean).length;
@@ -422,15 +496,34 @@ export default function Dashboard() {
   const topNeighborhoods  = useMemo(() => toArray(marketData?.topNeighborhoods).slice(0, 10), [marketData]);
   const propertySourceData = useMemo(() => toArray(marketData?.sources).filter((s) => s.value > 0), [marketData]);
 
-  // Price history con fallback
-  const priceHistory = useMemo(() =>
-    toArray(trackingStats?.priceHistory).map((item: any) => ({
-      mes:      item.mes || item.month || '?',
-      avgPrice: item.avgPrice ?? 0,
-      count:    item.count    ?? 0,
-      minPrice: item.minPrice ?? 0,
-      maxPrice: item.maxPrice ?? 0,
-    })),
+  // Price history separado por moneda — nunca mezclar CLP con UF
+  const { priceHistory, priceHistoryCurrencyLabel } = useMemo(() => {
+    const normalize = (arr: any[]): PriceHistoryPoint[] =>
+      toArray(arr).map((item: any) => ({
+        mes:      item.mes || item.month || '?',
+        avgPrice: item.avgPrice ?? 0,
+        count:    item.count    ?? 0,
+        minPrice: item.minPrice ?? undefined,
+        maxPrice: item.maxPrice ?? undefined,
+      }));
+
+    const clp = normalize(trackingStats?.priceHistoryCLP ?? trackingStats?.priceHistory ?? []);
+    const uf  = normalize(trackingStats?.priceHistoryUF  ?? []);
+
+    // Si solo hay una moneda con datos, usarla directamente
+    const hasCLP = clp.length > 0;
+    const hasUF  = uf.length  > 0;
+
+    if (priceHistoryCurrency === 'CLP') return { priceHistory: clp, priceHistoryCurrencyLabel: 'CLP' };
+    if (priceHistoryCurrency === 'UF')  return { priceHistory: uf,  priceHistoryCurrencyLabel: 'UF'  };
+    // auto: preferir la moneda con más puntos
+    if (hasUF && (!hasCLP || uf.length >= clp.length)) return { priceHistory: uf,  priceHistoryCurrencyLabel: 'UF'  };
+    return { priceHistory: clp, priceHistoryCurrencyLabel: 'CLP' };
+  }, [trackingStats, priceHistoryCurrency]);
+
+  const hasBothCurrencies = useMemo(() =>
+    toArray(trackingStats?.priceHistoryCLP).length > 0 &&
+    toArray(trackingStats?.priceHistoryUF).length  > 0,
     [trackingStats]);
 
   const radarTypes = useMemo(() =>
@@ -571,6 +664,27 @@ export default function Dashboard() {
             </Button>
           )}
 
+          <Tooltip title={reportError ?? 'Descargar informe PDF con los filtros activos'} arrow>
+            <span>
+              <Button
+                variant="outlined"
+                startIcon={reportDownloading ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdfIcon />}
+                onClick={downloadReport}
+                disabled={reportDownloading || loading || noCredits}
+                sx={{
+                  textTransform: 'none', borderRadius: 2, px: 3,
+                  borderColor: reportError ? COLORS.error : '#e0522a',
+                  color:       reportError ? COLORS.error : '#e0522a',
+                  '&:hover': {
+                    bgcolor: '#fff3f0',
+                    borderColor: '#c0391a',
+                  },
+                }}>
+                {reportDownloading ? 'Generando…' : 'Informe PDF'}
+              </Button>
+            </span>
+          </Tooltip>
+
           <Button variant="contained"
             startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
             onClick={fetchDashboardData}
@@ -583,6 +697,11 @@ export default function Dashboard() {
       </Box>
 
       {error && <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>{error}</Alert>}
+      {reportError && (
+        <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setReportError(null)}>
+          {reportError}
+        </Alert>
+      )}
 
       {user && <CreditBar credits={user.credits} plan={user.plan} role={user.role} />}
 
@@ -664,8 +783,15 @@ export default function Dashboard() {
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2 }}>
           {[
             {
-              label:    'Nuevas (última ejecución)',
-              value:    trackingStats?.newProperties ?? '—',
+              label:    'Nuevas (últ. 7 días)',
+              value:    (() => {
+                const n = trackingStats?.newProperties;
+                const total = trackingStats?.totalTracked ?? 0;
+                if (n == null) return '—';
+                if (n === 0) return '—';
+                if (total > 0 && n === total) return 'Primera ejecución';
+                return `+${n.toLocaleString('es-CL')}`;
+              })(),
               icon:     <NewReleasesIcon />,
               color:    '#2563eb',
               bg:       '#eff6ff',
@@ -726,39 +852,158 @@ export default function Dashboard() {
             <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText }}>
               Evolución del Precio Promedio
             </Typography>
+            <Chip
+              label={priceHistoryCurrencyLabel}
+              size="small"
+              sx={{ bgcolor: priceHistoryCurrencyLabel === 'UF' ? '#f0fdf4' : '#eff6ff',
+                    color:  priceHistoryCurrencyLabel === 'UF' ? '#15803d' : '#1d4ed8',
+                    fontWeight: 700, fontSize: '0.7rem' }}
+            />
           </Box>
-          <Chip label="Histórico mensual" size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            {hasBothCurrencies && (
+              <ToggleButtonGroup
+                value={priceHistoryCurrency}
+                exclusive
+                onChange={(_, v) => v && setPriceHistoryCurrency(v)}
+                size="small"
+              >
+                <ToggleButton value="auto" sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>Auto</ToggleButton>
+                <ToggleButton value="UF"   sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>UF</ToggleButton>
+                <ToggleButton value="CLP"  sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>CLP</ToggleButton>
+              </ToggleButtonGroup>
+            )}
+            <Chip label="Histórico mensual" size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600 }} />
+          </Box>
         </Box>
-        {loading ? <Skeleton variant="rectangular" height={320} sx={{ borderRadius: 2 }} /> :
-         priceHistory.length === 0 ? (
+        {loading ? (
+          <Skeleton variant="rectangular" height={320} sx={{ borderRadius: 2 }} />
+        ) : priceHistory.length === 0 ? (
           <EmptyState message="Sin historial de precios. Los datos aparecerán tras varias ejecuciones de los bots." />
+        ) : priceHistory.length === 1 ? (
+          // ── Un solo punto: tarjetas en vez de gráfico inútil ─────────────────
+          <Box>
+            <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', mb: 2 }}>
+              {priceHistory[0].mes} · {priceHistory[0].count} propiedades en {priceHistoryCurrencyLabel}
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
+              {[
+                { label: 'Precio promedio', value: priceHistory[0].avgPrice, color: COLORS.primary },
+                { label: 'Precio mínimo',   value: priceHistory[0].minPrice, color: COLORS.success },
+                { label: 'Precio máximo',   value: priceHistory[0].maxPrice, color: COLORS.error   },
+              ].map((item) => (
+                <Paper key={item.label} elevation={0} sx={{
+                  p: 2.5, borderRadius: 2, textAlign: 'center',
+                  border: `1px solid ${item.color}30`, bgcolor: `${item.color}08`,
+                }}>
+                  <Typography variant="caption" sx={{
+                    color: COLORS.mutedText, fontWeight: 600,
+                    textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 0.5,
+                  }}>
+                    {item.label}
+                  </Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: item.color }}>
+                    {priceHistoryCurrencyLabel === 'UF'
+                      ? `${item.value?.toLocaleString('es-CL', { maximumFractionDigits: 0 })} UF`
+                      : formatCLP(item.value)}
+                  </Typography>
+                </Paper>
+              ))}
+            </Box>
+            <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 2, display: 'block' }}>
+              El gráfico aparecerá cuando haya datos de más de un mes.
+            </Typography>
+          </Box>
         ) : (
+          // ── Múltiples puntos: gráfico limpio solo de precios ─────────────────
           <ResponsiveContainer width="100%" height={320}>
-            <ComposedChart data={priceHistory}>
+            <ComposedChart data={priceHistory} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
               <defs>
-                <linearGradient id="gradPrice" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={COLORS.primary} stopOpacity={0.25} />
+                <linearGradient id="gradAvg" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={COLORS.primary} stopOpacity={0.18} />
                   <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0}    />
                 </linearGradient>
-                <linearGradient id="gradCount" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={COLORS.accent} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={COLORS.accent} stopOpacity={0}   />
-                </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
-              <YAxis yAxisId="price" orientation="left"  tick={{ fontSize: 11 }} tickFormatter={(v) => formatCLP(v)} />
-              <YAxis yAxisId="count" orientation="right" tick={{ fontSize: 11 }} />
-              <RechartTooltip content={<PriceHistoryTooltip />} />
-              <Legend />
-              <Area  yAxisId="price" type="monotone" dataKey="avgPrice" stroke={COLORS.primary} fill="url(#gradPrice)" strokeWidth={2.5} name="Precio promedio" dot={{ r: 4, fill: COLORS.primary }} />
-              <Bar   yAxisId="count" dataKey="count" fill={COLORS.accent} fillOpacity={0.35} radius={[3, 3, 0, 0]} name="Propiedades" />
-              {priceHistory[0]?.minPrice !== undefined && (
-                <Line yAxisId="price" type="monotone" dataKey="minPrice" stroke="#94a3b8" strokeDasharray="4 2" strokeWidth={1.5} dot={false} name="Precio mínimo" />
-              )}
-              {priceHistory[0]?.maxPrice !== undefined && (
-                <Line yAxisId="price" type="monotone" dataKey="maxPrice" stroke="#f97316" strokeDasharray="4 2" strokeWidth={1.5} dot={false} name="Precio máximo" />
-              )}
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis
+                dataKey="mes"
+                tick={{ fontSize: 12, fill: COLORS.mutedText }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tickFormatter={(v) =>
+                  priceHistoryCurrencyLabel === 'UF'
+                    ? `${(v as number).toLocaleString('es-CL', { maximumFractionDigits: 0 })} UF`
+                    : formatCLP(v)
+                }
+                tick={{ fontSize: 11, fill: COLORS.mutedText }}
+                axisLine={false}
+                tickLine={false}
+                width={90}
+              />
+              <RechartTooltip
+                content={({ active, payload, label }: any) => {
+                  if (!active || !payload?.length) return null;
+                  const fmt = (v: number) =>
+                    priceHistoryCurrencyLabel === 'UF'
+                      ? `${v?.toLocaleString('es-CL', { maximumFractionDigits: 0 })} UF`
+                      : formatCLP(v);
+                  return (
+                    <Paper elevation={4} sx={{ p: 2, minWidth: 220, borderRadius: 2, border: '1px solid #e9ecef' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700, mb: 1, color: COLORS.darkText }}>
+                        {label}
+                      </Typography>
+                      {payload.map((entry: any) => (
+                        <Box key={entry.dataKey} sx={{ display: 'flex', justifyContent: 'space-between', gap: 3, mb: 0.4 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: entry.color, flexShrink: 0 }} />
+                            <Typography variant="caption" sx={{ color: COLORS.mutedText }}>{entry.name}</Typography>
+                          </Box>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: COLORS.darkText }}>
+                            {fmt(entry.value)}
+                          </Typography>
+                        </Box>
+                      ))}
+                      <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>
+                        {payload[0]?.payload?.count} propiedades · {priceHistoryCurrencyLabel}
+                      </Typography>
+                    </Paper>
+                  );
+                }}
+              />
+              <Legend
+                wrapperStyle={{ fontSize: 12, paddingTop: 12 }}
+                formatter={(value: string) => <span style={{ color: COLORS.mutedText }}>{value}</span>}
+              />
+              <Area
+                type="monotone"
+                dataKey="avgPrice"
+                stroke={COLORS.primary}
+                strokeWidth={2.5}
+                fill="url(#gradAvg)"
+                dot={{ r: 5, fill: COLORS.primary, strokeWidth: 2, stroke: '#fff' }}
+                activeDot={{ r: 7 }}
+                name="Precio promedio"
+              />
+              <Line
+                type="monotone"
+                dataKey="minPrice"
+                stroke={COLORS.success}
+                strokeWidth={1.5}
+                strokeDasharray="5 3"
+                dot={false}
+                name="Precio mínimo"
+              />
+              <Line
+                type="monotone"
+                dataKey="maxPrice"
+                stroke={COLORS.error}
+                strokeWidth={1.5}
+                strokeDasharray="5 3"
+                dot={false}
+                name="Precio máximo"
+              />
             </ComposedChart>
           </ResponsiveContainer>
         )}
@@ -918,7 +1163,8 @@ export default function Dashboard() {
                 <tr>
                   <th>Tipo</th>
                   <th style={{ textAlign: 'center' }}>Cantidad</th>
-                  <th style={{ textAlign: 'center' }}>Prom. Dormitorios</th>
+                  <th style={{ textAlign: 'center' }}>Moneda</th>
+                  <th style={{ textAlign: 'center' }}>Prom. Dorm.</th>
                   <th style={{ textAlign: 'center' }}>Prom. Baños</th>
                   <th style={{ textAlign: 'center' }}>Prom. m²</th>
                   <th style={{ textAlign: 'right'  }}>Precio Promedio</th>
@@ -926,30 +1172,68 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {propertyTypeStats.map((t) => (
-                  <tr key={t.type}>
-                    <td>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: t.color }} />
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.type}</Typography>
-                      </Box>
-                    </td>
-                    <td style={{ textAlign: 'center' }}><Chip label={t.count} size="small" sx={{ fontWeight: 600 }} /></td>
-                    <td style={{ textAlign: 'center' }}>{t.avgBedrooms  ? t.avgBedrooms.toFixed(1)  : '—'}</td>
-                    <td style={{ textAlign: 'center' }}>{t.avgBathrooms ? t.avgBathrooms.toFixed(1) : '—'}</td>
-                    <td style={{ textAlign: 'center' }}>{t.avgArea ? `${Math.round(t.avgArea)} m²` : '—'}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <Typography variant="body2" sx={{ fontWeight: 600, color: COLORS.primary }}>
-                        {t.avgPrice ? formatCLP(t.avgPrice) : '—'}
-                      </Typography>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
-                        {t.minPrice ? `${formatCLP(t.minPrice)} – ${formatCLP(t.maxPrice ?? 0)}` : '—'}
-                      </Typography>
-                    </td>
-                  </tr>
-                ))}
+                {(() => {
+                  const ufRows  = propertyTypeStats.filter((t) => (t.currency ?? '').toUpperCase() === 'UF');
+                  const clpRows = propertyTypeStats.filter((t) => (t.currency ?? '').toUpperCase() !== 'UF');
+                  const renderRow = (t: typeof propertyTypeStats[0]) => (
+                    <tr key={t.type}>
+                      <td>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: t.color }} />
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{t.type}</Typography>
+                        </Box>
+                      </td>
+                      <td style={{ textAlign: 'center' }}><Chip label={t.count} size="small" sx={{ fontWeight: 600 }} /></td>
+                      <td style={{ textAlign: 'center' }}>
+                        <Chip size="small" label={(t.currency ?? 'CLP').toUpperCase()}
+                          sx={{ fontWeight: 700, fontSize: '0.7rem',
+                            bgcolor: (t.currency ?? '').toUpperCase() === 'UF' ? '#dbeafe' : '#dcfce7',
+                            color:   (t.currency ?? '').toUpperCase() === 'UF' ? '#1d4ed8' : '#15803d' }} />
+                      </td>
+                      <td style={{ textAlign: 'center' }}>{t.avgBedrooms  ? t.avgBedrooms.toFixed(1)  : '—'}</td>
+                      <td style={{ textAlign: 'center' }}>{t.avgBathrooms ? t.avgBathrooms.toFixed(1) : '—'}</td>
+                      <td style={{ textAlign: 'center' }}>{t.avgArea ? `${Math.round(t.avgArea)} m²` : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: COLORS.primary }}>
+                          {t.avgPrice ? formatPrice(t.avgPrice, t.currency) : '—'}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+                          {t.minPrice ? `${formatPrice(t.minPrice, t.currency)} – ${formatPrice(t.maxPrice ?? 0, t.currency)}` : '—'}
+                        </Typography>
+                      </td>
+                    </tr>
+                  );
+                  return (
+                    <>
+                      {ufRows.length > 0 && (
+                        <>
+                          <tr>
+                            <td colSpan={8} style={{ paddingTop: 8, paddingBottom: 4 }}>
+                              <Typography variant="caption" sx={{ color: COLORS.mutedText, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                Propiedades en UF
+                              </Typography>
+                            </td>
+                          </tr>
+                          {ufRows.map(renderRow)}
+                        </>
+                      )}
+                      {clpRows.length > 0 && (
+                        <>
+                          <tr>
+                            <td colSpan={8} style={{ paddingTop: ufRows.length > 0 ? 16 : 8, paddingBottom: 4, borderTop: ufRows.length > 0 ? '2px solid #e9ecef' : 'none' }}>
+                              <Typography variant="caption" sx={{ color: COLORS.mutedText, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                Propiedades en CLP
+                              </Typography>
+                            </td>
+                          </tr>
+                          {clpRows.map(renderRow)}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </tbody>
             </Box>
           </Box>
