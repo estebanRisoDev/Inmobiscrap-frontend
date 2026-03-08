@@ -82,6 +82,18 @@ interface MarketData {
 }
 
 type PriceHistoryPoint = { mes: string; avgPrice: number; count: number; minPrice?: number; maxPrice?: number };
+type PriceHistoryGranularPoint = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number | null;
+  dayOfWeek: number;        // 0=Dom, 1=Lun … 6=Sáb
+  avgPrice: number;
+  minPrice?: number;
+  maxPrice?: number;
+  count: number;
+};
+type PriceTimeRange = 'day' | 'week' | 'month';
 
 interface TrackingStats {
   totalTracked: number;
@@ -290,7 +302,10 @@ export default function Dashboard() {
   const [filtersLoading,setFiltersLoading]= useState(true);
   const [error,         setError]         = useState<string | null>(null);
   const [priceFilter,   setPriceFilter]   = useState<'auto' | 'CLP' | 'UF'>('auto');
-  const [priceHistoryCurrency, setPriceHistoryCurrency] = useState<'auto' | 'CLP' | 'UF'>('auto');
+  const [priceHistoryCurrency,  setPriceHistoryCurrency]  = useState<'auto' | 'CLP' | 'UF'>('auto');
+  const [priceTimeRange,        setPriceTimeRange]        = useState<PriceTimeRange>('month');
+  const [priceHistoryGranular,  setPriceHistoryGranular]  = useState<PriceHistoryGranularPoint[]>([]);
+  const [priceHistoryLoading,   setPriceHistoryLoading]   = useState(false);
   const [noCredits,         setNoCredits]         = useState(false);
   const [reportDownloading, setReportDownloading] = useState(false);
   const [reportError,       setReportError]       = useState<string | null>(null);
@@ -421,6 +436,30 @@ export default function Dashboard() {
 
   useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
 
+  // ── Historial granular de precios (Día / Semana / Mes) ──────────
+  const fetchPriceHistory = useCallback(async () => {
+    setPriceHistoryLoading(true);
+    try {
+      const params = new URLSearchParams({ range: priceTimeRange });
+      if (priceHistoryCurrency !== 'auto') params.set('currency', priceHistoryCurrency);
+      // Pasar los mismos filtros geográficos/tipo que el resto del dashboard
+      if (committed.region)       params.set('region',       committed.region);
+      if (committed.city)         params.set('city',         committed.city);
+      if (committed.neighborhood) params.set('neighborhood', committed.neighborhood);
+      if (committed.propertyType) params.set('propertyType', committed.propertyType);
+      const res = await fetch(`${API_BASE_URL}/api/properties/price-history?${params}`, {
+        headers: authHeaders() as HeadersInit,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPriceHistoryGranular(data);
+      }
+    } catch { /* silencioso */ }
+    finally { setPriceHistoryLoading(false); }
+  }, [priceTimeRange, priceHistoryCurrency, committed]);
+
+  useEffect(() => { fetchPriceHistory(); }, [fetchPriceHistory]);
+
   // ── Descarga de informe PDF ────────────────────────────────────
   const downloadReport = useCallback(async () => {
     setReportDownloading(true);
@@ -525,6 +564,29 @@ export default function Dashboard() {
     toArray(trackingStats?.priceHistoryCLP).length > 0 &&
     toArray(trackingStats?.priceHistoryUF).length  > 0,
     [trackingStats]);
+
+  // ── Helpers de label para el gráfico granular ──────────────────
+  const DAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const DAY_NAMES_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+  const MONTH_NAMES_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
+  const buildLabel = (p: PriceHistoryGranularPoint, range: PriceTimeRange): string => {
+    if (range === 'day')   return `${String(p.hour ?? 0).padStart(2, '0')}:00`;
+    if (range === 'week')  return `${DAY_NAMES[p.dayOfWeek]} ${String(p.day).padStart(2, '0')}`;
+    return `${String(p.day).padStart(2, '0')}/${MONTH_NAMES_SHORT[p.month - 1]}`;
+  };
+
+  const buildTooltipTitle = (p: PriceHistoryGranularPoint, range: PriceTimeRange): string => {
+    if (range === 'day')  return `${String(p.hour ?? 0).padStart(2, '0')}:00 · ${String(p.day).padStart(2, '0')}/${MONTH_NAMES_SHORT[p.month - 1]}/${p.year}`;
+    if (range === 'week') return `${DAY_NAMES_FULL[p.dayOfWeek]} ${String(p.day).padStart(2, '0')} de ${MONTH_NAMES_SHORT[p.month - 1]}`;
+    return `${String(p.day).padStart(2, '0')} de ${MONTH_NAMES_SHORT[p.month - 1]} ${p.year}`;
+  };
+
+  // Pre-computa los labels para el eje X (recharts necesita dataKey simple)
+  const priceHistoryGranularWithLabel = useMemo(
+    () => priceHistoryGranular.map(p => ({ ...p, _label: buildLabel(p, priceTimeRange) })),
+    [priceHistoryGranular, priceTimeRange]   // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const radarTypes = useMemo(() =>
     propertyTypeStats.filter((t) => ['Departamento', 'Casa', 'Prefabricada'].includes(t.type)),
@@ -846,7 +908,8 @@ export default function Dashboard() {
           PRECIO: Evolución temporal (gráfico principal)
           ══════════════════════════════════════════════════════════════ */}
       <ChartPaper sx={{ mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+        {/* ── Header ─────────────────────────────────────────────── */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, flexWrap: 'wrap', gap: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AttachMoneyIcon sx={{ color: COLORS.primary }} />
             <Typography variant="h6" sx={{ fontWeight: 700, color: COLORS.darkText }}>
@@ -860,37 +923,67 @@ export default function Dashboard() {
                     fontWeight: 700, fontSize: '0.7rem' }}
             />
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            {hasBothCurrencies && (
-              <ToggleButtonGroup
-                value={priceHistoryCurrency}
-                exclusive
-                onChange={(_, v) => v && setPriceHistoryCurrency(v)}
-                size="small"
-              >
-                <ToggleButton value="auto" sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>Auto</ToggleButton>
-                <ToggleButton value="UF"   sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>UF</ToggleButton>
-                <ToggleButton value="CLP"  sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>CLP</ToggleButton>
-              </ToggleButtonGroup>
-            )}
-            <Chip label="Histórico mensual" size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+            {/* Selector de periodo */}
+            <ToggleButtonGroup
+              value={priceTimeRange}
+              exclusive
+              onChange={(_, v) => v && setPriceTimeRange(v)}
+              size="small"
+            >
+              <ToggleButton value="day"   sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>Día</ToggleButton>
+              <ToggleButton value="week"  sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>Semana</ToggleButton>
+              <ToggleButton value="month" sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>Mes</ToggleButton>
+            </ToggleButtonGroup>
+            {/* Selector de moneda */}
+            <ToggleButtonGroup
+              value={priceHistoryCurrency}
+              exclusive
+              onChange={(_, v) => v && setPriceHistoryCurrency(v)}
+              size="small"
+            >
+              <ToggleButton value="auto" sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>Auto</ToggleButton>
+              <ToggleButton value="UF"   sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>UF</ToggleButton>
+              <ToggleButton value="CLP"  sx={{ textTransform: 'none', px: 1.5, fontSize: '0.75rem' }}>CLP</ToggleButton>
+            </ToggleButtonGroup>
+            {/* Chip dinámico según rango */}
+            <Chip
+              label={priceTimeRange === 'day' ? 'Últimas 24h · por hora' : priceTimeRange === 'week' ? 'Últimos 7 días' : 'Últimos 30 días'}
+              size="small"
+              sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600 }}
+            />
           </Box>
         </Box>
-        {loading ? (
+
+        {/* ── Subtítulo de observaciones ──────────────────────────── */}
+        {!priceHistoryLoading && priceHistoryGranular.length > 0 && (
+          <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', mb: 1.5 }}>
+            {priceHistoryGranular.reduce((s, p) => s + p.count, 0).toLocaleString('es-CL')} observaciones ·{' '}
+            {priceHistoryGranular.length} puntos de datos · {priceHistoryCurrencyLabel}
+          </Typography>
+        )}
+
+        {/* ── Contenido ───────────────────────────────────────────── */}
+        {(loading || priceHistoryLoading) ? (
           <Skeleton variant="rectangular" height={320} sx={{ borderRadius: 2 }} />
-        ) : priceHistory.length === 0 ? (
-          <EmptyState message="Sin historial de precios. Los datos aparecerán tras varias ejecuciones de los bots." />
-        ) : priceHistory.length === 1 ? (
-          // ── Un solo punto: tarjetas en vez de gráfico inútil ─────────────────
+        ) : priceHistoryGranular.length === 0 ? (
+          <EmptyState message={
+            priceTimeRange === 'day'  ? 'Sin datos en las últimas 24 horas. Ejecuta un bot para registrar snapshots.' :
+            priceTimeRange === 'week' ? 'Sin datos en los últimos 7 días. Los datos aparecerán tras ejecutar bots esta semana.' :
+                                        'Sin historial de precios. Los datos aparecerán tras varias ejecuciones de los bots.'
+          } />
+        ) : priceHistoryGranular.length === 1 ? (
+          // ── Un solo punto: tarjetas ──────────────────────────────
           <Box>
             <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', mb: 2 }}>
-              {priceHistory[0].mes} · {priceHistory[0].count} propiedades en {priceHistoryCurrencyLabel}
+              {buildTooltipTitle(priceHistoryGranular[0], priceTimeRange)}
+              {' · '}{priceHistoryGranular[0].count} propiedades en {priceHistoryCurrencyLabel}
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
               {[
-                { label: 'Precio promedio', value: priceHistory[0].avgPrice, color: COLORS.primary },
-                { label: 'Precio mínimo',   value: priceHistory[0].minPrice, color: COLORS.success },
-                { label: 'Precio máximo',   value: priceHistory[0].maxPrice, color: COLORS.error   },
+                { label: 'Precio promedio', value: priceHistoryGranular[0].avgPrice, color: COLORS.primary },
+                { label: 'Precio mínimo',   value: priceHistoryGranular[0].minPrice, color: COLORS.success },
+                { label: 'Precio máximo',   value: priceHistoryGranular[0].maxPrice, color: COLORS.error   },
               ].map((item) => (
                 <Paper key={item.label} elevation={0} sx={{
                   p: 2.5, borderRadius: 2, textAlign: 'center',
@@ -911,13 +1004,15 @@ export default function Dashboard() {
               ))}
             </Box>
             <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 2, display: 'block' }}>
-              El gráfico aparecerá cuando haya datos de más de un mes.
+              {priceTimeRange === 'day'  ? 'El gráfico aparecerá cuando haya datos de más de una hora.' :
+               priceTimeRange === 'week' ? 'El gráfico aparecerá cuando haya datos de más de un día.' :
+                                           'El gráfico aparecerá cuando haya datos de más de un día.'}
             </Typography>
           </Box>
         ) : (
-          // ── Múltiples puntos: gráfico limpio solo de precios ─────────────────
+          // ── Múltiples puntos: gráfico ────────────────────────────
           <ResponsiveContainer width="100%" height={320}>
-            <ComposedChart data={priceHistory} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+            <ComposedChart data={priceHistoryGranularWithLabel} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
               <defs>
                 <linearGradient id="gradAvg" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor={COLORS.primary} stopOpacity={0.18} />
@@ -926,10 +1021,11 @@ export default function Dashboard() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
               <XAxis
-                dataKey="mes"
+                dataKey="_label"
                 tick={{ fontSize: 12, fill: COLORS.mutedText }}
                 axisLine={false}
                 tickLine={false}
+                interval={priceHistoryGranularWithLabel.length > 15 ? Math.ceil(priceHistoryGranularWithLabel.length / 10) - 1 : 0}
               />
               <YAxis
                 tickFormatter={(v) =>
@@ -943,8 +1039,9 @@ export default function Dashboard() {
                 width={90}
               />
               <RechartTooltip
-                content={({ active, payload, label }: any) => {
+                content={({ active, payload }: any) => {
                   if (!active || !payload?.length) return null;
+                  const point: PriceHistoryGranularPoint = payload[0]?.payload;
                   const fmt = (v: number) =>
                     priceHistoryCurrencyLabel === 'UF'
                       ? `${v?.toLocaleString('es-CL', { maximumFractionDigits: 0 })} UF`
@@ -952,7 +1049,7 @@ export default function Dashboard() {
                   return (
                     <Paper elevation={4} sx={{ p: 2, minWidth: 220, borderRadius: 2, border: '1px solid #e9ecef' }}>
                       <Typography variant="body2" sx={{ fontWeight: 700, mb: 1, color: COLORS.darkText }}>
-                        {label}
+                        {buildTooltipTitle(point, priceTimeRange)}
                       </Typography>
                       {payload.map((entry: any) => (
                         <Box key={entry.dataKey} sx={{ display: 'flex', justifyContent: 'space-between', gap: 3, mb: 0.4 }}>
@@ -966,7 +1063,7 @@ export default function Dashboard() {
                         </Box>
                       ))}
                       <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>
-                        {payload[0]?.payload?.count} propiedades · {priceHistoryCurrencyLabel}
+                        {point.count} propiedades · {priceHistoryCurrencyLabel}
                       </Typography>
                     </Paper>
                   );
@@ -982,8 +1079,8 @@ export default function Dashboard() {
                 stroke={COLORS.primary}
                 strokeWidth={2.5}
                 fill="url(#gradAvg)"
-                dot={{ r: 5, fill: COLORS.primary, strokeWidth: 2, stroke: '#fff' }}
-                activeDot={{ r: 7 }}
+                dot={priceHistoryGranularWithLabel.length <= 15 ? { r: 4, fill: COLORS.primary, strokeWidth: 2, stroke: '#fff' } : false}
+                activeDot={{ r: 6 }}
                 name="Precio promedio"
               />
               <Line
