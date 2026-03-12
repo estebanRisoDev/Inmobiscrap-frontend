@@ -10,6 +10,8 @@ import {
   Alert, Button, Chip, Select, MenuItem, FormControl,
   InputLabel, IconButton, Skeleton, Avatar, Divider,
   ToggleButton, ToggleButtonGroup, LinearProgress, Tooltip,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  TableSortLabel, TablePagination, Checkbox,
 } from '@mui/material';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -23,6 +25,7 @@ import ApartmentIcon     from '@mui/icons-material/Apartment';
 import BathtubIcon       from '@mui/icons-material/Bathtub';
 import BedIcon           from '@mui/icons-material/Bed';
 import SquareFootIcon    from '@mui/icons-material/SquareFoot';
+import LocationOnIcon    from '@mui/icons-material/LocationOn';
 import AttachMoneyIcon   from '@mui/icons-material/AttachMoney';
 import TrendingUpIcon    from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon  from '@mui/icons-material/TrendingDown';
@@ -42,6 +45,14 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import ChangeCircleIcon  from '@mui/icons-material/ChangeCircle';
 import NewReleasesIcon   from '@mui/icons-material/NewReleases';
+import CompareIcon       from '@mui/icons-material/Compare';
+import AnalyticsIcon     from '@mui/icons-material/Analytics';
+import TableChartIcon    from '@mui/icons-material/TableChart';
+import OpenInNewIcon     from '@mui/icons-material/OpenInNew';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import AccessTimeIcon    from '@mui/icons-material/AccessTime';
+import CheckCircleIcon   from '@mui/icons-material/CheckCircle';
+import BarChartIcon      from '@mui/icons-material/BarChart';
 import { useRouter }     from 'next/navigation';
 import { useAuth }       from '@/context/AuthContext';
 import { authHeaders }   from '@/lib/auth';
@@ -122,6 +133,62 @@ interface PriceChangeItem {
   url?: string;
 }
 
+// ── Metrics Types ──────────────────────────────────────────────────────────────
+
+interface GeneralMetrics {
+  totalProperties: number;
+  conditionDistribution: Array<{ condition: string; count: number }>;
+  avgDaysOnMarket: number | null;
+  publicationByMonth: Array<{ month: string; count: number }>;
+  priceByCondition: Array<{
+    condition: string; currency: string; count: number;
+    avgPrice: number; minPrice: number; maxPrice: number;
+  }>;
+  priceByAge: Array<{ range: string; count: number; avgPrice: number }>;
+  conditionByType: Array<{ propertyType: string; condition: string; count: number }>;
+  propertiesWithPubDate: number;
+  propertiesWithCondition: number;
+  avgPricePerSqm: Array<{ currency: string; count: number; avg: number; min: number; max: number }>;
+  pricePerSqmByType: Array<{ propertyType: string; currency: string; count: number; avg: number }>;
+  pricePerSqmByCity: Array<{ city: string; currency: string; count: number; avg: number }>;
+  pricePerSqmByCondition: Array<{ condition: string; currency: string; count: number; avg: number }>;
+}
+
+interface PropertyMetricItem {
+  id: number;
+  title: string;
+  price: number | null;
+  currency: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  area: number | null;
+  propertyType: string | null;
+  city: string | null;
+  region: string | null;
+  neighborhood: string | null;
+  condition: string | null;
+  publicationDate: string | null;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  timesScraped: number;
+  listingStatus: string | null;
+  sourceUrl: string | null;
+  daysOnMarket: number | null;
+  pricePerSqm: number | null;
+}
+
+interface PropertyListResponse {
+  items: PropertyMetricItem[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+interface CompareResponse {
+  properties: PropertyMetricItem[];
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const toArray = (v: any) => (Array.isArray(v) ? v : []);
@@ -139,10 +206,15 @@ const formatUF = (value: number | undefined | null) => {
   return `${value.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} UF`;
 };
 
-const formatPrice = (value: number | undefined | null, currency?: string) =>
+const formatPrice = (value: number | undefined | null, currency?: string | null) =>
   (currency ?? '').toUpperCase() === 'UF' ? formatUF(value) : formatCLP(value);
 
-const normalizePropertyType = (type?: string): string => {
+const formatDate = (d: string | null | undefined) => {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+const normalizePropertyType = (type?: string | null): string => {
   if (!type) return 'Otro';
   const l = type.toLowerCase().trim();
   if (l.includes('departamento') || l.includes('depto')) return 'Departamento';
@@ -185,6 +257,55 @@ const PROPERTY_TYPE_COLORS: Record<string, string> = {
 
 const PIE_COLORS   = ['#0f4c81','#2a9d8f','#e8927c','#f4a261','#264653','#e76f51','#8ecae6','#adb5bd'];
 const EMPTY_FILTERS: Filters = { region: '', city: '', neighborhood: '', propertyType: '' };
+
+// ── Chile Map Data ─────────────────────────────────────────────────────────────
+
+const CHILE_REGIONS_SVG = [
+  { id: 'arica',         name: 'Arica y Parinacota',  short: 'Arica y P.',   x: 50, y: 0,   w: 80,  h: 24 },
+  { id: 'tarapaca',      name: 'Tarapacá',             short: 'Tarapacá',     x: 48, y: 24,  w: 84,  h: 34 },
+  { id: 'antofagasta',   name: 'Antofagasta',          short: 'Antofagasta',  x: 44, y: 58,  w: 90,  h: 69 },
+  { id: 'atacama',       name: 'Atacama',              short: 'Atacama',      x: 38, y: 127, w: 98,  h: 47 },
+  { id: 'coquimbo',      name: 'Coquimbo',             short: 'Coquimbo',     x: 30, y: 174, w: 110, h: 38 },
+  { id: 'valparaiso',    name: 'Valparaíso',           short: 'Valparaíso',   x: 20, y: 212, w: 125, h: 20 },
+  { id: 'metropolitana', name: 'Metropolitana',        short: 'R.M.',         x: 18, y: 232, w: 130, h: 16 },
+  { id: 'ohiggins',      name: "O'Higgins",            short: "O'Higgins",    x: 16, y: 248, w: 132, h: 19 },
+  { id: 'maule',         name: 'Maule',                short: 'Maule',        x: 14, y: 267, w: 136, h: 22 },
+  { id: 'nuble',         name: 'Ñuble',                short: 'Ñuble',        x: 12, y: 289, w: 138, h: 17 },
+  { id: 'biobio',        name: 'Biobío',               short: 'Biobío',       x: 10, y: 306, w: 142, h: 22 },
+  { id: 'araucania',     name: 'La Araucanía',         short: 'Araucanía',    x: 8,  y: 328, w: 144, h: 26 },
+  { id: 'losrios',       name: 'Los Ríos',             short: 'Los Ríos',     x: 6,  y: 354, w: 148, h: 19 },
+  { id: 'loslagos',      name: 'Los Lagos',            short: 'Los Lagos',    x: 4,  y: 373, w: 152, h: 36 },
+  { id: 'aysen',         name: 'Aysén',                short: 'Aysén',        x: 2,  y: 409, w: 156, h: 58 },
+  { id: 'magallanes',    name: 'Magallanes',           short: 'Magallanes',   x: 0,  y: 467, w: 160, h: 53 },
+] as const;
+
+function normalizeStr(s: string) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+}
+
+function findSvgRegionId(apiRegion: string): string | null {
+  const an = normalizeStr(apiRegion);
+  for (const r of CHILE_REGIONS_SVG) {
+    const rn = normalizeStr(r.name);
+    if (an.includes(rn) || rn.includes(an)) return r.id;
+  }
+  return null;
+}
+
+function findApiRegion(svgId: string, apiRegions: string[]): string | null {
+  const svg = CHILE_REGIONS_SVG.find((r) => r.id === svgId);
+  if (!svg) return null;
+  const sn = normalizeStr(svg.name);
+  let best: string | null = null, bestLen = 0;
+  for (const ar of apiRegions) {
+    const an = normalizeStr(ar);
+    if (an.includes(sn) || sn.includes(an)) {
+      const len = Math.min(an.length, sn.length);
+      if (len > bestLen) { best = ar; bestLen = len; }
+    }
+  }
+  return best;
+}
 
 // ── Radar Tooltip ──────────────────────────────────────────────────────────────
 
@@ -230,7 +351,9 @@ const PriceHistoryTooltip = ({ active, payload, label }: any) => {
 
 // ── Credit Bar ─────────────────────────────────────────────────────────────────
 
-function CreditBar({ credits, plan, role }: { credits: number; plan: string; role: string }) {
+function CreditBar({ credits, plan, role, sessionStart, onRecharge }: {
+  credits: number; plan: string; role: string; sessionStart: number; onRecharge: () => void;
+}) {
   if (plan === 'pro' || role === 'admin') {
     return (
       <Paper elevation={0} sx={{ px: 2.5, py: 1.5, mb: 3, borderRadius: 2,
@@ -243,7 +366,10 @@ function CreditBar({ credits, plan, role }: { credits: number; plan: string; rol
       </Paper>
     );
   }
-  const percentage  = Math.max(0, Math.min(100, (credits / INITIAL_CREDITS) * 100));
+
+  const maxCredits  = sessionStart > 0 ? sessionStart : Math.max(credits, INITIAL_CREDITS);
+  const used        = sessionStart > 0 ? Math.max(0, sessionStart - credits) : 0;
+  const percentage  = Math.max(0, Math.min(100, (credits / maxCredits) * 100));
   const isLow       = credits <= 10;
   const isEmpty     = credits <= 0;
   const barColor    = isEmpty ? '#ef4444' : isLow ? '#f59e0b' : '#3b82f6';
@@ -254,24 +380,28 @@ function CreditBar({ credits, plan, role }: { credits: number; plan: string; rol
   return (
     <Paper elevation={0} sx={{ px: 2.5, py: 1.5, mb: 3, borderRadius: 2, bgcolor: bgColor, border: `1px solid ${borderColor}` }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <TokenIcon sx={{ color: barColor, fontSize: 20 }} />
-          <Typography variant="body2" sx={{ fontWeight: 700, color: textColor }}>
-            {isEmpty ? 'Sin créditos disponibles' : `${credits} crédito${credits !== 1 ? 's' : ''} restante${credits !== 1 ? 's' : ''}`}
-          </Typography>
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 700, color: textColor, lineHeight: 1.2 }}>
+              {isEmpty ? 'Sin créditos disponibles' : `${credits} crédito${credits !== 1 ? 's' : ''} restante${credits !== 1 ? 's' : ''}`}
+            </Typography>
+            {used > 0 && (
+              <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+                Usados esta sesión: <strong style={{ color: textColor }}>{used}</strong>
+              </Typography>
+            )}
+          </Box>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Typography variant="caption" sx={{ color: COLORS.mutedText }}>{credits} / {INITIAL_CREDITS}</Typography>
-          {isEmpty && (
-            <Button size="small" variant="contained"
+          <Typography variant="caption" sx={{ color: COLORS.mutedText }}>{credits} / {maxCredits}</Typography>
+          {(isEmpty || isLow) && (
+            <Button size="small" variant="contained" onClick={onRecharge}
               sx={{ textTransform: 'none', fontSize: '0.75rem', fontWeight: 700, px: 2, py: 0.25,
-                    bgcolor: '#f59e0b', '&:hover': { bgcolor: '#d97706' }, borderRadius: 1.5 }}>
-              Actualizar a Pro
+                    bgcolor: isEmpty ? '#ef4444' : '#f59e0b',
+                    '&:hover': { bgcolor: isEmpty ? '#dc2626' : '#d97706' }, borderRadius: 1.5 }}>
+              {isEmpty ? 'Recargar créditos' : 'Recargar'}
             </Button>
-          )}
-          {isLow && !isEmpty && (
-            <Chip label="Quedan pocas" size="small"
-              sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, fontSize: '0.7rem', height: 22 }} />
           )}
         </Box>
       </Box>
@@ -279,11 +409,124 @@ function CreditBar({ credits, plan, role }: { credits: number; plan: string; rol
         sx={{ height: 6, borderRadius: 3, bgcolor: `${barColor}20`,
               '& .MuiLinearProgress-bar': { borderRadius: 3, bgcolor: barColor } }} />
       <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>
-        Cada consulta al dashboard (filtros, actualización) consume 1 crédito.
-        {!isEmpty && isLow && ' Considera actualizar a Pro para consultas ilimitadas.'}
+        Cada consulta consume 5 créditos. Comparar propiedades: 5 créditos por cada una.
+        {!isEmpty && isLow && ' Considera recargar para seguir consultando.'}
       </Typography>
     </Paper>
   );
+}
+
+// ── Chile Map Panel ────────────────────────────────────────────────────────────
+
+function ChileMapPanel({
+  selectedRegion, availableRegions, onRegionClick,
+}: {
+  selectedRegion: string; availableRegions: string[]; onRegionClick: (region: string) => void;
+}) {
+  const [hovered, setHovered] = useState<string | null>(null);
+
+  const selectedId   = selectedRegion ? findSvgRegionId(selectedRegion) : null;
+  const availableIds = useMemo(
+    () => new Set(availableRegions.map((r) => findSvgRegionId(r)).filter(Boolean) as string[]),
+    [availableRegions],
+  );
+
+  return (
+    <Box sx={{ display: 'flex', gap: 2.5, alignItems: 'flex-start', pt: 0.5 }}>
+      {/* SVG Map */}
+      <Box sx={{ flexShrink: 0 }}>
+        <svg viewBox="0 0 160 520" width={130} height={430} style={{ display: 'block' }}>
+          {CHILE_REGIONS_SVG.map((region) => {
+            const isSelected  = selectedId === region.id;
+            const isAvailable = availableIds.has(region.id);
+            const isHovered   = hovered === region.id && isAvailable;
+
+            const fill   = isSelected  ? '#0f4c81'
+                         : isHovered   ? '#93c5fd'
+                         : isAvailable ? '#bfdbfe'
+                         : '#e9ecef';
+            const stroke = isSelected  ? '#0a3d68'
+                         : isHovered   ? '#3b82f6'
+                         : isAvailable ? '#93c5fd'
+                         : '#d1d5db';
+
+            return (
+              <g key={region.id}
+                style={{ cursor: isAvailable ? 'pointer' : 'default' }}
+                onMouseEnter={() => isAvailable && setHovered(region.id)}
+                onMouseLeave={() => setHovered(null)}
+                onClick={() => {
+                  if (!isAvailable) return;
+                  if (isSelected) { onRegionClick(''); return; }
+                  const apiRegion = findApiRegion(region.id, availableRegions);
+                  if (apiRegion) onRegionClick(apiRegion);
+                }}
+              >
+                <rect
+                  x={region.x} y={region.y} width={region.w} height={region.h}
+                  fill={fill} stroke={stroke} strokeWidth={1} rx={2}
+                  style={{ transition: 'fill 0.15s ease' }}
+                />
+                {region.h >= 15 && (
+                  <text
+                    x={region.x + region.w / 2} y={region.y + region.h / 2 + 3.5}
+                    textAnchor="middle"
+                    fontSize={Math.min(8.5, region.h - 5)}
+                    fill={isSelected ? '#fff' : '#374151'}
+                    fontFamily="Inter, system-ui, sans-serif"
+                    fontWeight={isSelected ? 700 : 400}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {region.short}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </Box>
+
+      {/* Leyenda + tooltip */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Typography variant="caption" sx={{ color: COLORS.mutedText, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          Mapa de Chile
+        </Typography>
+        {hovered && isHoveredAvailable(hovered, availableIds) && (
+          <Typography variant="body2" sx={{ fontWeight: 600, color: COLORS.primary }}>
+            {CHILE_REGIONS_SVG.find((r) => r.id === hovered)?.name}
+          </Typography>
+        )}
+        {selectedRegion && (
+          <Box sx={{ bgcolor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 1.5, px: 1.5, py: 0.75 }}>
+            <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block' }}>Seleccionada</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700, color: COLORS.primary, fontSize: '0.8rem' }}>{selectedRegion}</Typography>
+          </Box>
+        )}
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+          {[
+            { color: '#0f4c81', label: 'Seleccionada' },
+            { color: '#bfdbfe', label: `Con datos (${availableIds.size})` },
+            { color: '#e9ecef', label: 'Sin datos' },
+          ].map((item) => (
+            <Box key={item.label} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box sx={{ width: 11, height: 11, bgcolor: item.color, borderRadius: '2px', border: '1px solid #d1d5db', flexShrink: 0 }} />
+              <Typography variant="caption" sx={{ color: COLORS.mutedText }}>{item.label}</Typography>
+            </Box>
+          ))}
+        </Box>
+        {selectedRegion && (
+          <Button size="small" onClick={() => onRegionClick('')}
+            sx={{ textTransform: 'none', fontSize: '0.75rem', color: COLORS.error, p: 0, minWidth: 0, alignSelf: 'flex-start', mt: 0.5 }}>
+            × Limpiar región
+          </Button>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+function isHoveredAvailable(id: string | null, set: Set<string>) {
+  return id !== null && set.has(id);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -310,6 +553,22 @@ export default function Dashboard() {
   const [reportDownloading, setReportDownloading] = useState(false);
   const [reportError,       setReportError]       = useState<string | null>(null);
 
+  // ── Metrics State ──────────────────────────────────────────────
+  const [metricsMode, setMetricsMode]       = useState<'general' | 'individual'>('general');
+  const [generalMetrics, setGeneralMetrics] = useState<GeneralMetrics | null>(null);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [propertyList, setPropertyList]     = useState<PropertyListResponse | null>(null);
+  const [loadingPropertyList, setLoadingPropertyList] = useState(false);
+  const [metricsSortBy, setMetricsSortBy]   = useState('price');
+  const [metricsSortDir, setMetricsSortDir] = useState<'asc' | 'desc'>('asc');
+  const [metricsPage, setMetricsPage]       = useState(0);
+  const [metricsPageSize, setMetricsPageSize] = useState(25);
+  const [metricsCondition, setMetricsCondition] = useState('');
+  const [metricsCurrency, setMetricsCurrency]   = useState('');
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<Set<number>>(new Set());
+  const [compareData, setCompareData]       = useState<CompareResponse | null>(null);
+  const [loadingCompare, setLoadingCompare] = useState(false);
+
   const [locations, setLocations] = useState<Locations>({
     regions: [], cities: [], neighborhoods: [], propertyTypes: [],
   });
@@ -317,6 +576,9 @@ export default function Dashboard() {
   const [committed, setCommitted] = useState<Filters>(EMPTY_FILTERS);
   const [filteredCities,        setFilteredCities]        = useState<string[]>([]);
   const [filteredNeighborhoods, setFilteredNeighborhoods] = useState<string[]>([]);
+  const [showChileMap,          setShowChileMap]          = useState(false);
+  const sessionStartRef = useRef<number | null>(null);
+  const [sessionStart,  setSessionStart]  = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -324,6 +586,14 @@ export default function Dashboard() {
     debounceRef.current = setTimeout(() => setCommitted(staged), 400);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [staged]);
+
+  // Captura de créditos iniciales (solo la primera vez que user tiene datos)
+  useEffect(() => {
+    if (user && sessionStartRef.current === null) {
+      sessionStartRef.current = user.credits;
+      setSessionStart(user.credits);
+    }
+  }, [user]);
 
   // Cascada de filtros
   useEffect(() => {
@@ -460,22 +730,147 @@ export default function Dashboard() {
 
   useEffect(() => { fetchPriceHistory(); }, [fetchPriceHistory]);
 
+  // ── Métricas: General ──────────────────────────────────────────
+  const fetchGeneralMetrics = useCallback(async () => {
+    setLoadingMetrics(true);
+    try {
+      const params: Record<string, string> = {};
+      if (committed.region)       params.region = committed.region;
+      if (committed.city)         params.city = committed.city;
+      if (committed.neighborhood) params.neighborhood = committed.neighborhood;
+      if (committed.propertyType) params.propertyType = committed.propertyType;
+      const { data } = await axios.get(`${API_BASE_URL}/api/metrics/general`, { params, headers: authHeaders() });
+      setGeneralMetrics(data);
+    } catch { /* silent */ }
+    finally { setLoadingMetrics(false); }
+  }, [committed]);
+
+  // ── Métricas: Lista de propiedades ─────────────────────────────
+  const fetchPropertyList = useCallback(async () => {
+    setLoadingPropertyList(true);
+    try {
+      const params: Record<string, string | number> = {
+        sortBy: metricsSortBy, sortDir: metricsSortDir,
+        page: metricsPage + 1, pageSize: metricsPageSize,
+      };
+      if (committed.region)       params.region = committed.region;
+      if (committed.city)         params.city = committed.city;
+      if (committed.neighborhood) params.neighborhood = committed.neighborhood;
+      if (committed.propertyType) params.propertyType = committed.propertyType;
+      if (metricsCondition)       params.condition = metricsCondition;
+      if (metricsCurrency)        params.currency = metricsCurrency;
+      const { data } = await axios.get(`${API_BASE_URL}/api/metrics/properties`, { params, headers: authHeaders() });
+      setPropertyList(data);
+    } catch { /* silent */ }
+    finally { setLoadingPropertyList(false); }
+  }, [committed, metricsSortBy, metricsSortDir, metricsPage, metricsPageSize, metricsCondition, metricsCurrency]);
+
+  // ── Métricas: Comparación ──────────────────────────────────────
+  const fetchCompareData = useCallback(async () => {
+    if (selectedPropertyIds.size < 2) { setCompareData(null); return; }
+    setLoadingCompare(true);
+    try {
+      const ids = Array.from(selectedPropertyIds).join(',');
+      const { data } = await axios.get(`${API_BASE_URL}/api/metrics/compare`, { params: { ids }, headers: authHeaders() });
+      setCompareData(data);
+    } catch { /* silent */ }
+    finally { setLoadingCompare(false); }
+  }, [selectedPropertyIds]);
+
+  useEffect(() => { if (metricsMode === 'general') fetchGeneralMetrics(); }, [metricsMode, fetchGeneralMetrics]);
+  useEffect(() => { if (metricsMode === 'individual') fetchPropertyList(); }, [metricsMode, fetchPropertyList]);
+  useEffect(() => { if (selectedPropertyIds.size >= 2) fetchCompareData(); else setCompareData(null); }, [selectedPropertyIds, fetchCompareData]);
+
+  // Metrics helpers
+  const handleMetricsSort = (col: string) => {
+    if (metricsSortBy === col) setMetricsSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setMetricsSortBy(col); setMetricsSortDir('asc'); }
+    setMetricsPage(0);
+  };
+  const MAX_COMPARE = 20;
+  const togglePropertySelect = (id: number) => {
+    setSelectedPropertyIds(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) { n.delete(id); }
+      else if (n.size < MAX_COMPARE) { n.add(id); }
+      return n;
+    });
+  };
+  const selectAllOnPage = () => {
+    if (!propertyList) return;
+    const ids = propertyList.items.map(p => p.id);
+    const allSelected = ids.every(id => selectedPropertyIds.has(id));
+    setSelectedPropertyIds(prev => {
+      const n = new Set(prev);
+      if (allSelected) { ids.forEach(id => n.delete(id)); }
+      else { ids.forEach(id => { if (n.size < MAX_COMPARE) n.add(id); }); }
+      return n;
+    });
+  };
+  const atMaxSelection = selectedPropertyIds.size >= MAX_COMPARE;
+
+  // Comparison chart data
+  const comparisonBarData = useMemo(() => {
+    if (!compareData?.properties?.length) return [];
+    return compareData.properties.map(p => ({
+      name: (p.title ?? '').substring(0, 20) + ((p.title ?? '').length > 20 ? '...' : ''),
+      id: p.id, price: p.price ?? 0, area: p.area ?? 0,
+      bedrooms: p.bedrooms ?? 0, bathrooms: p.bathrooms ?? 0,
+      daysOnMarket: p.daysOnMarket ?? 0, currency: p.currency ?? 'CLP',
+      condition: p.condition ?? '—',
+      pricePerSqm: p.pricePerSqm ?? 0,
+    }));
+  }, [compareData]);
+
+  const comparisonRadarData = useMemo(() => {
+    if (!compareData?.properties?.length) return [];
+    const props = compareData.properties;
+    const maxP = Math.max(...props.map(p => p.price ?? 0), 1);
+    const maxA = Math.max(...props.map(p => p.area ?? 0), 1);
+    const maxB = Math.max(...props.map(p => p.bedrooms ?? 0), 1);
+    const maxBa = Math.max(...props.map(p => p.bathrooms ?? 0), 1);
+    const maxD = Math.max(...props.map(p => p.daysOnMarket ?? 0), 1);
+    const maxPSqm = Math.max(...props.map(p => p.pricePerSqm ?? 0), 1);
+    return ['Precio', 'Superficie', 'Precio/m²', 'Dormitorios', 'Baños', 'Días publicado'].map(metric => {
+      const row: Record<string, any> = { metric };
+      props.forEach((p, i) => {
+        const key = `P${i + 1}`;
+        switch (metric) {
+          case 'Precio':      row[key] = ((p.price ?? 0) / maxP) * 100; row[`${key}_real`] = formatPrice(p.price, p.currency); break;
+          case 'Superficie':  row[key] = ((p.area ?? 0) / maxA) * 100; row[`${key}_real`] = `${p.area ?? 0} m²`; break;
+          case 'Precio/m²':   row[key] = ((p.pricePerSqm ?? 0) / maxPSqm) * 100; row[`${key}_real`] = `${(p.pricePerSqm ?? 0).toLocaleString()} ${p.currency ?? ''}/m²`; break;
+          case 'Dormitorios': row[key] = ((p.bedrooms ?? 0) / maxB) * 100; row[`${key}_real`] = p.bedrooms ?? 0; break;
+          case 'Baños':       row[key] = ((p.bathrooms ?? 0) / maxBa) * 100; row[`${key}_real`] = p.bathrooms ?? 0; break;
+          case 'Días publicado': row[key] = ((p.daysOnMarket ?? 0) / maxD) * 100; row[`${key}_real`] = `${p.daysOnMarket ?? 0} días`; break;
+        }
+      });
+      return row;
+    });
+  }, [compareData]);
+
   // ── Descarga de informe PDF ────────────────────────────────────
   const downloadReport = useCallback(async () => {
     setReportDownloading(true);
     setReportError(null);
 
-    const params = new URLSearchParams();
-    if (committed.region)       params.set('region',       committed.region);
-    if (committed.city)         params.set('city',         committed.city);
-    if (committed.neighborhood) params.set('neighborhood', committed.neighborhood);
-    if (committed.propertyType) params.set('propertyType', committed.propertyType);
+    // Determinar qué tipo de informe generar
+    const isComparison = metricsMode === 'individual' && selectedPropertyIds.size >= 2;
+    let url: string;
+
+    if (isComparison) {
+      const ids = Array.from(selectedPropertyIds).join(',');
+      url = `${API_BASE_URL}/api/reports/compare?ids=${ids}`;
+    } else {
+      const params = new URLSearchParams();
+      if (committed.region)       params.set('region',       committed.region);
+      if (committed.city)         params.set('city',         committed.city);
+      if (committed.neighborhood) params.set('neighborhood', committed.neighborhood);
+      if (committed.propertyType) params.set('propertyType', committed.propertyType);
+      url = `${API_BASE_URL}/api/reports/market?${params.toString()}`;
+    }
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/reports/market?${params.toString()}`,
-        { headers: authHeaders() as HeadersInit }
-      );
+      const response = await fetch(url, { headers: authHeaders() as HeadersInit });
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -484,24 +879,23 @@ export default function Dashboard() {
 
       const blob = await response.blob();
 
-      // Leer nombre del archivo desde Content-Disposition si el backend lo envía
       const disposition = response.headers.get('content-disposition') ?? '';
       const match        = disposition.match(/filename[^;=\n]*=((['""]).*?\2|[^;\n]*)/);
-      const filename     = match?.[1]?.replace(/['"]/g, '') ?? 'informe-inmobiliario.pdf';
+      const filename     = match?.[1]?.replace(/['"]/g, '')
+        ?? (isComparison ? 'comparativa-propiedades.pdf' : 'informe-inmobiliario.pdf');
 
-      // Trigger de descarga del navegador
-      const url  = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href  = url;
+      link.href  = blobUrl;
       link.download = filename;
       link.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(blobUrl);
     } catch (err: any) {
       setReportError(err?.message ?? 'No se pudo generar el informe.');
     } finally {
       setReportDownloading(false);
     }
-  }, [committed]);
+  }, [committed, metricsMode, selectedPropertyIds]);
 
   // ── Helpers ────────────────────────────────────────────────────
   const activeFilterCount = Object.values(staged).filter(Boolean).length;
@@ -681,7 +1075,8 @@ export default function Dashboard() {
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
 
       {/* ─── Header ─── */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+        {/* Left: Title */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBackIcon />}
             onClick={() => router.push(isAdmin ? '/botdashboard' : '/')}
@@ -689,7 +1084,7 @@ export default function Dashboard() {
               '&:hover': { borderColor: COLORS.primary, color: COLORS.primary } }}>
             Volver
           </Button>
-          <Box>
+          <Box sx={{ whiteSpace: 'nowrap' }}>
             <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px' }}>
               Dashboard Inmobiliario
             </Typography>
@@ -700,7 +1095,8 @@ export default function Dashboard() {
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {/* Right: User + Buttons */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end', ml: 'auto', whiteSpace: 'nowrap' }}>
           {user && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Avatar src={user.avatarUrl} sx={{ width: 36, height: 36, bgcolor: COLORS.primary, fontSize: '0.85rem' }}>
@@ -715,7 +1111,6 @@ export default function Dashboard() {
               </IconButton>
             </Box>
           )}
-
           {isAdmin && (
             <Button variant="contained" startIcon={<SmartToyIcon />}
               onClick={() => router.push('/botdashboard')}
@@ -726,13 +1121,13 @@ export default function Dashboard() {
             </Button>
           )}
 
-          <Tooltip title={reportError ?? 'Descargar informe PDF con los filtros activos'} arrow>
+          <Tooltip title={reportError ?? (metricsMode === 'individual' && selectedPropertyIds.size >= 2 ? 'Descargar informe comparativo de propiedades seleccionadas' : 'Descargar informe PDF con los filtros activos')} arrow>
             <span>
               <Button
                 variant="outlined"
                 startIcon={reportDownloading ? <CircularProgress size={16} color="inherit" /> : <PictureAsPdfIcon />}
                 onClick={downloadReport}
-                disabled={reportDownloading || loading || noCredits}
+                disabled={reportDownloading || loading || noCredits || (metricsMode === 'individual' && selectedPropertyIds.size < 2)}
                 sx={{
                   textTransform: 'none', borderRadius: 2, px: 3,
                   borderColor: reportError ? COLORS.error : '#e0522a',
@@ -742,7 +1137,7 @@ export default function Dashboard() {
                     borderColor: '#c0391a',
                   },
                 }}>
-                {reportDownloading ? 'Generando…' : 'Informe PDF'}
+                {reportDownloading ? 'Generando…' : metricsMode === 'individual' && selectedPropertyIds.size >= 2 ? 'Informe Comparativo' : 'Informe PDF'}
               </Button>
             </span>
           </Tooltip>
@@ -765,7 +1160,7 @@ export default function Dashboard() {
         </Alert>
       )}
 
-      {user && <CreditBar credits={user.credits} plan={user.plan} role={user.role} />}
+      {user && <CreditBar credits={user.credits} plan={user.plan} role={user.role} sessionStart={0} onRecharge={() => window.location.href = '/billing'} />}
 
       {/* ─── Panel de Filtros ─── */}
       <ChartPaper sx={{ mb: 3 }}>
@@ -826,6 +1221,28 @@ export default function Dashboard() {
           </Box>
         )}
       </ChartPaper>
+
+      {/* ─── Toggle General / Individual ─── */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+        <ToggleButtonGroup
+          value={metricsMode}
+          exclusive
+          onChange={(_, v) => { if (v) { setMetricsMode(v); setSelectedPropertyIds(new Set()); } }}
+          sx={{ '& .MuiToggleButton-root': { textTransform: 'none', px: 3, py: 1, fontSize: '0.95rem', fontWeight: 600 } }}
+        >
+          <ToggleButton value="general">
+            <BarChartIcon sx={{ mr: 1, fontSize: 20 }} /> General
+          </ToggleButton>
+          <ToggleButton value="individual">
+            <TableChartIcon sx={{ mr: 1, fontSize: 20 }} /> Individual
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          MODO GENERAL — Promedios, gráficos, métricas agregadas
+          ══════════════════════════════════════════════════════════════════ */}
+      {metricsMode === 'general' && (<>
 
       {/* ─── KPI Cards ─── */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(6, 1fr)' }, gap: 2, mb: 4 }}>
@@ -1392,6 +1809,567 @@ export default function Dashboard() {
           </ResponsiveContainer>
         )}
       </ChartPaper>
+
+      {/* ─── Métricas de Publicación (Nuevo/Usado, Antigüedad) ─── */}
+      {loadingMetrics && !generalMetrics ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
+          ) : generalMetrics && (
+            <>
+              {/* KPI Cards */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 2.5, mb: 4 }}>
+                <StatCard title="Total Propiedades" value={generalMetrics.totalProperties.toLocaleString('es-CL')}
+                  icon={<HomeIcon />} color={COLORS.primary} />
+                <StatCard title="Prom. días en mercado"
+                  value={generalMetrics.avgDaysOnMarket != null ? `${generalMetrics.avgDaysOnMarket}` : '—'}
+                  icon={<AccessTimeIcon />} color={COLORS.accent}
+                  subtitle={`${generalMetrics.propertiesWithPubDate} con fecha de publicación`} />
+                <StatCard title="Propiedades Nuevas"
+                  value={generalMetrics.conditionDistribution?.find(c => c.condition === 'Nuevo')?.count ?? 0}
+                  icon={<NewReleasesIcon />} color={COLORS.success}
+                  subtitle={`${generalMetrics.propertiesWithCondition} con estado informado`} />
+                <StatCard title="Propiedades Usadas"
+                  value={generalMetrics.conditionDistribution?.find(c => c.condition === 'Usado')?.count ?? 0}
+                  icon={<CheckCircleIcon />} color={COLORS.warning} />
+              </Box>
+
+              {/* Row 1: Condition Pie + Price by Condition */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 3 }}>
+                <ChartPaper>
+                  <SectionHeader title="Distribución Nuevo / Usado" icon={<NewReleasesIcon />} />
+                  {(generalMetrics.conditionDistribution?.length ?? 0) > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <PieChart>
+                        <Pie data={generalMetrics.conditionDistribution}
+                          dataKey="count" nameKey="condition"
+                          cx="50%" cy="50%" outerRadius={100}
+                          label={({ name, percent }: any) => `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`}>
+                          {(generalMetrics.conditionDistribution ?? []).map((_, i) => (
+                            <Cell key={i} fill={i === 0 ? COLORS.success : COLORS.warning} />
+                          ))}
+                        </Pie>
+                        <RechartTooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : <EmptyState message="Sin datos de estado disponibles" />}
+                </ChartPaper>
+
+                <ChartPaper>
+                  <SectionHeader title="Precio promedio por estado" icon={<AttachMoneyIcon />} />
+                  {(generalMetrics.priceByCondition?.length ?? 0) > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={generalMetrics.priceByCondition}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                        <XAxis dataKey="condition" tick={{ fontSize: 12 }} />
+                        <YAxis tick={{ fontSize: 11 }}
+                          tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
+                        <RechartTooltip formatter={(value: any) => formatCLP(value)} />
+                        <Legend />
+                        <Bar dataKey="avgPrice" name="Promedio" fill={COLORS.primary} radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="minPrice" name="Mínimo" fill={COLORS.accent} radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="maxPrice" name="Máximo" fill={COLORS.secondary} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <EmptyState message="Sin datos de precio por estado" />}
+                </ChartPaper>
+              </Box>
+
+              {/* Row 2: Publication Timeline + Price by Age */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 3 }}>
+                <ChartPaper>
+                  <SectionHeader title="Publicaciones por mes" icon={<CalendarTodayIcon />} />
+                  {(generalMetrics.publicationByMonth?.length ?? 0) > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <AreaChart data={generalMetrics.publicationByMonth}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                        <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <RechartTooltip />
+                        <Area type="monotone" dataKey="count" name="Publicaciones"
+                          stroke={COLORS.primary} fill={COLORS.primary} fillOpacity={0.2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : <EmptyState message="Sin datos de publicación" />}
+                </ChartPaper>
+
+                <ChartPaper>
+                  <SectionHeader title="Precio promedio por antigüedad" icon={<TrendingUpIcon />} />
+                  {(generalMetrics.priceByAge?.length ?? 0) > 0 ? (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart data={generalMetrics.priceByAge}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                        <XAxis dataKey="range" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }}
+                          tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
+                        <RechartTooltip formatter={(value: any) => formatCLP(value)} />
+                        <Bar dataKey="avgPrice" name="Precio promedio" radius={[4, 4, 0, 0]}>
+                          {(generalMetrics.priceByAge ?? []).map((_, i) => (
+                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <EmptyState message="Sin datos de antigüedad" />}
+                </ChartPaper>
+              </Box>
+
+              {/* Row 3: Condition by Property Type */}
+              {(generalMetrics.conditionByType?.length ?? 0) > 0 && (
+                <ChartPaper sx={{ mb: 3 }}>
+                  <SectionHeader title="Estado por tipo de propiedad" icon={<ApartmentIcon />} />
+                  {(() => {
+                    const types = [...new Set((generalMetrics.conditionByType ?? []).map(c => normalizePropertyType(c.propertyType)))];
+                    const data = types.map(t => {
+                      const items = (generalMetrics.conditionByType ?? []).filter(c => normalizePropertyType(c.propertyType) === t);
+                      return {
+                        type: t,
+                        Nuevo: items.find(c => c.condition === 'Nuevo')?.count ?? 0,
+                        Usado: items.find(c => c.condition === 'Usado')?.count ?? 0,
+                      };
+                    });
+                    return (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={data}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="type" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RechartTooltip />
+                          <Legend />
+                          <Bar dataKey="Nuevo" name="Nuevo" fill={COLORS.success} radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Usado" name="Usado" fill={COLORS.warning} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </ChartPaper>
+              )}
+
+              {/* Row 4: Price per m² */}
+              {(generalMetrics.avgPricePerSqm?.length ?? 0) > 0 && (
+                <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+                  {(generalMetrics.avgPricePerSqm ?? []).map(item => (
+                    <ChartPaper key={item.currency} sx={{ flex: '1 1 250px', mb: 0 }}>
+                      <SectionHeader title={`Precio/m² promedio (${item.currency})`} icon={<BarChartIcon />} />
+                      <Box sx={{ display: 'flex', justifyContent: 'space-around', py: 2 }}>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="h5" fontWeight="bold" color="primary">{item.avg.toLocaleString()}</Typography>
+                          <Typography variant="caption" color="text.secondary">Promedio</Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="h6" color="success.main">{item.min.toLocaleString()}</Typography>
+                          <Typography variant="caption" color="text.secondary">Mínimo</Typography>
+                        </Box>
+                        <Box sx={{ textAlign: 'center' }}>
+                          <Typography variant="h6" color="error.main">{item.max.toLocaleString()}</Typography>
+                          <Typography variant="caption" color="text.secondary">Máximo</Typography>
+                        </Box>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center' }}>
+                        Basado en {item.count} propiedades con precio y superficie
+                      </Typography>
+                    </ChartPaper>
+                  ))}
+                </Box>
+              )}
+
+              {(generalMetrics.pricePerSqmByType?.length ?? 0) > 0 && (
+                <ChartPaper sx={{ mb: 3 }}>
+                  <SectionHeader title="Precio/m² por tipo de propiedad" icon={<ApartmentIcon />} />
+                  {(() => {
+                    const currencies = [...new Set((generalMetrics.pricePerSqmByType ?? []).map(x => x.currency))];
+                    const types = [...new Set((generalMetrics.pricePerSqmByType ?? []).map(x => normalizePropertyType(x.propertyType)))];
+                    const data = types.map(t => {
+                      const row: Record<string, string | number> = { type: t };
+                      currencies.forEach(c => {
+                        const item = (generalMetrics.pricePerSqmByType ?? []).find(x => normalizePropertyType(x.propertyType) === t && x.currency === c);
+                        row[c] = item?.avg ?? 0;
+                      });
+                      return row;
+                    });
+                    const barColors = ['#e0522a', '#2563eb', '#16a34a', '#f59e0b'];
+                    return (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={data}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="type" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RechartTooltip />
+                          <Legend />
+                          {currencies.map((c, i) => (
+                            <Bar key={c} dataKey={c} name={`${c}/m²`} fill={barColors[i % barColors.length]} radius={[4, 4, 0, 0]} />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </ChartPaper>
+              )}
+
+              {(generalMetrics.pricePerSqmByCity?.length ?? 0) > 0 && (
+                <ChartPaper sx={{ mb: 3 }}>
+                  <SectionHeader title="Precio/m² por ciudad (Top 20)" icon={<LocationOnIcon />} />
+                  <ResponsiveContainer width="100%" height={Math.max(300, (generalMetrics.pricePerSqmByCity?.length ?? 0) * 30)}>
+                    <BarChart data={generalMetrics.pricePerSqmByCity} layout="vertical">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                      <XAxis type="number" tick={{ fontSize: 11 }} />
+                      <YAxis dataKey="city" type="category" width={120} tick={{ fontSize: 10 }} />
+                      <RechartTooltip formatter={(v: number) => v.toLocaleString()} />
+                      <Bar dataKey="avg" name="Precio/m² promedio" fill="#e0522a" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartPaper>
+              )}
+
+              {(generalMetrics.pricePerSqmByCondition?.length ?? 0) > 0 && (
+                <ChartPaper sx={{ mb: 3 }}>
+                  <SectionHeader title="Precio/m² por estado (Nuevo vs Usado)" icon={<CheckCircleIcon />} />
+                  {(() => {
+                    const currencies = [...new Set((generalMetrics.pricePerSqmByCondition ?? []).map(x => x.currency))];
+                    const data = currencies.map(c => {
+                      const items = (generalMetrics.pricePerSqmByCondition ?? []).filter(x => x.currency === c);
+                      const row: Record<string, string | number> = { currency: c };
+                      items.forEach(item => { row[item.condition] = item.avg; });
+                      return row;
+                    });
+                    return (
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={data}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="currency" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RechartTooltip />
+                          <Legend />
+                          <Bar dataKey="Nuevo" name="Nuevo" fill={COLORS.success} radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="Usado" name="Usado" fill={COLORS.warning} radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </ChartPaper>
+              )}
+            </>
+          )}
+
+      </>)}
+
+      {/* ─── INDIVIDUAL METRICS ─── */}
+      {metricsMode === 'individual' && (
+        <>
+          {/* Extra filters for individual mode */}
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Estado</InputLabel>
+              <Select value={metricsCondition} label="Estado"
+                onChange={e => { setMetricsCondition(e.target.value); setMetricsPage(0); }}>
+                <MenuItem value="">Todos</MenuItem>
+                <MenuItem value="Nuevo">Nuevo</MenuItem>
+                <MenuItem value="Usado">Usado</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Moneda</InputLabel>
+              <Select value={metricsCurrency} label="Moneda"
+                onChange={e => { setMetricsCurrency(e.target.value); setMetricsPage(0); }}>
+                <MenuItem value="">Todas</MenuItem>
+                <MenuItem value="CLP">CLP</MenuItem>
+                <MenuItem value="UF">UF</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+
+          {/* Selection bar */}
+          {selectedPropertyIds.size > 0 && (
+            <Paper elevation={0} sx={{
+              px: 2.5, py: 1.5, mb: 2, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 2,
+              bgcolor: selectedPropertyIds.size >= 2 ? '#f0fdf4' : '#fffbeb',
+              border: `1px solid ${selectedPropertyIds.size >= 2 ? '#bbf7d0' : '#fde68a'}`,
+            }}>
+              <CompareIcon sx={{ color: selectedPropertyIds.size >= 2 ? COLORS.success : COLORS.warning, fontSize: 20 }} />
+              <Typography variant="body2" sx={{ fontWeight: 600, color: selectedPropertyIds.size >= 2 ? '#15803d' : '#92400e' }}>
+                {selectedPropertyIds.size} / {MAX_COMPARE} {selectedPropertyIds.size === 1 ? 'propiedad seleccionada' : 'propiedades seleccionadas'}
+                {selectedPropertyIds.size === 1 && ' — Selecciona al menos 2 para comparar'}
+                {atMaxSelection && ' — Límite máximo alcanzado'}
+              </Typography>
+              <Button size="small" onClick={() => setSelectedPropertyIds(new Set())}
+                sx={{ ml: 'auto', textTransform: 'none' }}>
+                Limpiar selección
+              </Button>
+            </Paper>
+          )}
+
+          {/* Data Table */}
+          <Paper elevation={0} sx={{ borderRadius: 3, border: '1px solid #e9ecef', mb: 3, overflow: 'hidden' }}>
+            {loadingPropertyList && !propertyList ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>
+            ) : (
+              <>
+                <TableContainer sx={{ maxHeight: 600 }}>
+                  <Table stickyHeader size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            indeterminate={selectedPropertyIds.size > 0 && propertyList?.items
+                              ? !propertyList.items.every(p => selectedPropertyIds.has(p.id)) && propertyList.items.some(p => selectedPropertyIds.has(p.id))
+                              : false}
+                            checked={propertyList?.items ? propertyList.items.every(p => selectedPropertyIds.has(p.id)) && propertyList.items.length > 0 : false}
+                            onChange={selectAllOnPage}
+                          />
+                        </TableCell>
+                        {[
+                          { id: 'title', label: 'Título', w: 250 },
+                          { id: 'price', label: 'Precio', w: 130 },
+                          { id: 'propertyType', label: 'Tipo', w: 100 },
+                          { id: 'condition', label: 'Estado', w: 85 },
+                          { id: 'bedrooms', label: 'Dorm.', w: 65 },
+                          { id: 'bathrooms', label: 'Baños', w: 65 },
+                          { id: 'area', label: 'm²', w: 75 },
+                          { id: 'pricepersqm', label: 'Precio/m²', w: 100 },
+                          { id: 'city', label: 'Ciudad', w: 110 },
+                          { id: 'publicationdate', label: 'Publicado', w: 100 },
+                          { id: 'firstseenat', label: 'Detectado', w: 100 },
+                        ].map(col => (
+                          <TableCell key={col.id} sx={{ fontWeight: 700, fontSize: '0.75rem', minWidth: col.w }}>
+                            <TableSortLabel active={metricsSortBy === col.id}
+                              direction={metricsSortBy === col.id ? metricsSortDir : 'asc'}
+                              onClick={() => handleMetricsSort(col.id)}>
+                              {col.label}
+                            </TableSortLabel>
+                          </TableCell>
+                        ))}
+                        <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Link</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {propertyList?.items.map(p => (
+                        <TableRow key={p.id} hover selected={selectedPropertyIds.has(p.id)}
+                          sx={{
+                            cursor: (!selectedPropertyIds.has(p.id) && atMaxSelection) ? 'not-allowed' : 'pointer',
+                            '&.Mui-selected': { bgcolor: '#f0f9ff' },
+                            opacity: (!selectedPropertyIds.has(p.id) && atMaxSelection) ? 0.5 : 1,
+                          }}
+                          onClick={() => togglePropertySelect(p.id)}>
+                          <TableCell padding="checkbox">
+                            <Checkbox checked={selectedPropertyIds.has(p.id)}
+                              disabled={!selectedPropertyIds.has(p.id) && atMaxSelection} />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontWeight: 500, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {p.title}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontWeight: 600, color: COLORS.primary }}>
+                              {formatPrice(p.price, p.currency)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Chip label={normalizePropertyType(p.propertyType)} size="small" sx={{ fontSize: '0.7rem', height: 22 }} />
+                          </TableCell>
+                          <TableCell>
+                            {p.condition ? (
+                              <Chip label={p.condition} size="small"
+                                color={p.condition === 'Nuevo' ? 'success' : 'warning'}
+                                sx={{ fontSize: '0.7rem', height: 22 }} />
+                            ) : '—'}
+                          </TableCell>
+                          <TableCell align="center">{p.bedrooms ?? '—'}</TableCell>
+                          <TableCell align="center">{p.bathrooms ?? '—'}</TableCell>
+                          <TableCell>{p.area ? `${p.area} m²` : '—'}</TableCell>
+                          <TableCell>
+                            <Typography variant="body2" sx={{ fontSize: '0.8rem', color: COLORS.primary }}>
+                              {p.pricePerSqm ? `${p.pricePerSqm.toLocaleString()} ${p.currency ?? ''}` : '—'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell><Typography variant="caption">{p.city ?? '—'}</Typography></TableCell>
+                          <TableCell><Typography variant="caption">{formatDate(p.publicationDate)}</Typography></TableCell>
+                          <TableCell><Typography variant="caption">{formatDate(p.firstSeenAt)}</Typography></TableCell>
+                          <TableCell>
+                            {p.sourceUrl && (
+                              <IconButton size="small" onClick={e => { e.stopPropagation(); window.open(p.sourceUrl!, '_blank'); }}>
+                                <OpenInNewIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {(!propertyList?.items || propertyList.items.length === 0) && (
+                        <TableRow>
+                          <TableCell colSpan={13} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
+                            No se encontraron propiedades con los filtros aplicados
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                {propertyList && (
+                  <TablePagination component="div" count={propertyList.totalCount}
+                    page={metricsPage} onPageChange={(_, p) => setMetricsPage(p)}
+                    rowsPerPage={metricsPageSize}
+                    onRowsPerPageChange={e => { setMetricsPageSize(parseInt(e.target.value, 10)); setMetricsPage(0); }}
+                    rowsPerPageOptions={[10, 25, 50, 100]}
+                    labelRowsPerPage="Por página:"
+                    labelDisplayedRows={({ from, to, count }) => `${from}-${to} de ${count}`} />
+                )}
+              </>
+            )}
+          </Paper>
+
+          {/* ─── COMPARISON CHARTS (2+ selected) ─── */}
+          {selectedPropertyIds.size >= 2 && (
+            <>
+              <SectionHeader title={`Comparación de ${selectedPropertyIds.size} propiedades`} icon={<CompareIcon />} />
+
+              {loadingCompare ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress /></Box>
+              ) : compareData && (
+                <>
+                  {/* Property cards */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: `repeat(${Math.min(compareData.properties.length, 4)}, 1fr)` }, gap: 2, mb: 3 }}>
+                    {compareData.properties.map((p, i) => (
+                      <Card key={p.id} sx={{
+                        borderTop: `4px solid ${PIE_COLORS[i % PIE_COLORS.length]}`,
+                        transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 },
+                      }}>
+                        <CardContent sx={{ p: 2 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <Chip label={`P${i + 1}`} size="small"
+                              sx={{ bgcolor: PIE_COLORS[i % PIE_COLORS.length], color: '#fff', fontWeight: 700 }} />
+                            <Typography variant="body2" sx={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {p.title}
+                            </Typography>
+                          </Box>
+                          <Divider sx={{ my: 1 }} />
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
+                            <Typography variant="caption" color="textSecondary">Precio:</Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 600 }}>{formatPrice(p.price, p.currency)}</Typography>
+                            <Typography variant="caption" color="textSecondary">Tipo:</Typography>
+                            <Typography variant="caption">{normalizePropertyType(p.propertyType)}</Typography>
+                            <Typography variant="caption" color="textSecondary">Estado:</Typography>
+                            <Typography variant="caption">{p.condition ?? '—'}</Typography>
+                            <Typography variant="caption" color="textSecondary">Dorm/Baños:</Typography>
+                            <Typography variant="caption">{p.bedrooms ?? '—'} / {p.bathrooms ?? '—'}</Typography>
+                            <Typography variant="caption" color="textSecondary">Superficie:</Typography>
+                            <Typography variant="caption">{p.area ? `${p.area} m²` : '—'}</Typography>
+                            <Typography variant="caption" color="textSecondary">Ciudad:</Typography>
+                            <Typography variant="caption">{p.city ?? '—'}</Typography>
+                            <Typography variant="caption" color="textSecondary">Días publicado:</Typography>
+                            <Typography variant="caption">{p.daysOnMarket ?? '—'}</Typography>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </Box>
+
+                  {/* Charts */}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 3 }}>
+                    <ChartPaper>
+                      <SectionHeader title="Comparación de precios" icon={<AttachMoneyIcon />} />
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={comparisonBarData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
+                          <YAxis tick={{ fontSize: 11 }}
+                            tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
+                          <RechartTooltip formatter={(value: any, _: any, props: any) => [formatPrice(value, props.payload?.currency), 'Precio']} />
+                          <Bar dataKey="price" name="Precio" radius={[4, 4, 0, 0]}>
+                            {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartPaper>
+
+                    <ChartPaper sx={{ overflow: 'visible', position: 'relative', zIndex: 10 }}>
+                      <SectionHeader title="Comparación multidimensional" icon={<AnalyticsIcon />} />
+                      <ResponsiveContainer width="100%" height={300}>
+                        <RadarChart data={comparisonRadarData}>
+                          <PolarGrid stroke="#e9ecef" />
+                          <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11 }} />
+                          <PolarRadiusAxis tick={false} domain={[0, 100]} />
+                          <RechartTooltip
+                            wrapperStyle={{ zIndex: 1000, pointerEvents: 'none' }}
+                            position={{ x: 0, y: -10 }}
+                            content={({ active, payload, label }: any) => {
+                            if (!active || !payload?.length) return null;
+                            return (
+                              <Paper elevation={6} sx={{ p: 1.5, minWidth: 180, maxHeight: 320, overflow: 'auto', border: '1px solid #e0e0e0', bgcolor: 'rgba(255,255,255,0.97)' }}>
+                                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>{label}</Typography>
+                                {payload.map((entry: any) => {
+                                  const realV = entry.payload?.[`${entry.dataKey}_real`];
+                                  return (
+                                    <Box key={entry.dataKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.4 }}>
+                                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: entry.color, flexShrink: 0 }} />
+                                      <Typography variant="caption" sx={{ color: COLORS.mutedText, minWidth: 30 }}>{entry.name}:</Typography>
+                                      <Typography variant="caption" sx={{ fontWeight: 700 }}>{realV ?? entry.value}</Typography>
+                                    </Box>
+                                  );
+                                })}
+                              </Paper>
+                            );
+                          }} />
+                          <Legend />
+                          {compareData.properties.map((p, i) => (
+                            <Radar key={p.id} name={`P${i + 1}`} dataKey={`P${i + 1}`}
+                              stroke={PIE_COLORS[i % PIE_COLORS.length]} fill={PIE_COLORS[i % PIE_COLORS.length]} fillOpacity={0.15} />
+                          ))}
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </ChartPaper>
+                  </Box>
+
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' }, gap: 3, mb: 3 }}>
+                    <ChartPaper>
+                      <SectionHeader title="Superficie (m²)" icon={<SquareFootIcon />} />
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={comparisonBarData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RechartTooltip formatter={(value: any) => [`${value} m²`, 'Superficie']} />
+                          <Bar dataKey="area" name="m²" radius={[4, 4, 0, 0]}>
+                            {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartPaper>
+
+                    <ChartPaper>
+                      <SectionHeader title="Precio por m²" icon={<BarChartIcon />} />
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={comparisonBarData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
+                          <YAxis tick={{ fontSize: 11 }}
+                            tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
+                          <RechartTooltip formatter={(value: any, _: any, props: any) => [`${Number(value).toLocaleString()} ${props.payload?.currency}/m²`, 'Precio/m²']} />
+                          <Bar dataKey="pricePerSqm" name="Precio/m²" radius={[4, 4, 0, 0]}>
+                            {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartPaper>
+
+                    <ChartPaper>
+                      <SectionHeader title="Días en mercado" icon={<AccessTimeIcon />} />
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={comparisonBarData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RechartTooltip formatter={(value: any) => [`${value} días`, 'Tiempo']} />
+                          <Bar dataKey="daysOnMarket" name="Días" radius={[4, 4, 0, 0]}>
+                            {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartPaper>
+                  </Box>
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
     </Box>
   );
 }

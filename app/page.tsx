@@ -17,6 +17,7 @@ const C = {
   text:      '#e2eaf2',
   muted:     '#556070',
   dim:       '#1a2535',
+  warning:     '#f59e0b',
   creditHigh:  '#00ff88',
   creditMid:   '#f59e0b',
   creditLow:   '#ef4444',
@@ -289,12 +290,15 @@ function MetricsChart() {
 function PlanCard({
   plan,
   onSelect,
+  isCurrentPro,
 }: {
   plan: typeof PLANS[number];
   onSelect: (planId: string) => void;
+  isCurrentPro: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const featured = !!plan.featured;
+  const isActivePro = plan.id === 'pro' && isCurrentPro;
 
   return (
     <div
@@ -332,14 +336,22 @@ function PlanCard({
       </div>
 
       <button
+        disabled={isActivePro}
         style={{
           ...s.planBtn,
-          background: featured ? `linear-gradient(135deg, ${C.accent}, ${C.primary})` : `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
-          opacity: hovered ? 0.95 : 1,
+          background: isActivePro
+            ? `${C.accent}20`
+            : featured
+              ? `linear-gradient(135deg, ${C.accent}, ${C.primary})`
+              : `linear-gradient(135deg, ${C.secondary}, ${C.primary})`,
+          color: isActivePro ? C.accent : featured ? '#000' : '#fff',
+          cursor: isActivePro ? 'default' : 'pointer',
+          opacity: hovered && !isActivePro ? 0.95 : 1,
+          border: isActivePro ? `1px solid ${C.accent}44` : 'none',
         }}
-        onClick={() => onSelect(plan.id)}
+        onClick={() => !isActivePro && onSelect(plan.id)}
       >
-        {plan.cta} →
+        {isActivePro ? '✓ Plan activo' : `${plan.cta} →`}
       </button>
 
       {plan.id === 'base' && (
@@ -358,12 +370,18 @@ function UserNavPill({
   isPro,
   onLogout,
   onDashboard,
+  onManagePro,
+  onBillings,
+  onAdminSubscriptions,
 }: {
   user: any;
   isAdmin: boolean;
   isPro: boolean;
   onLogout: () => void;
   onDashboard: () => void;
+  onManagePro: () => void;
+  onBillings: () => void;
+  onAdminSubscriptions: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -450,6 +468,32 @@ function UserNavPill({
           </button>
 
           <div style={s.dropdownDivider} />
+          <button style={s.dropdownBtn} onClick={() => { setMenuOpen(false); onBillings(); }}>
+            <span>🧾</span>
+            <span>Mis compras</span>
+          </button>
+
+          {isPro && (
+            <>
+              <div style={s.dropdownDivider} />
+              <button style={{ ...s.dropdownBtn, color: C.accent }} onClick={() => { setMenuOpen(false); onManagePro(); }}>
+                <span>⚙</span>
+                <span>Gestionar suscripción Pro</span>
+              </button>
+            </>
+          )}
+
+          {isAdmin && (
+            <>
+              <div style={s.dropdownDivider} />
+              <button style={{ ...s.dropdownBtn, color: C.warning }} onClick={() => { setMenuOpen(false); onAdminSubscriptions(); }}>
+                <span>🧪</span>
+                <span>Test suscripciones</span>
+              </button>
+            </>
+          )}
+
+          <div style={s.dropdownDivider} />
 
           <button
             style={{ ...s.dropdownBtn, color: '#f85149' }}
@@ -529,6 +573,9 @@ export default function LandingPage() {
                   isPro={isPro}
                   onLogout={logout}
                   onDashboard={handleDashboard}
+                  onManagePro={() => router.push('/billing')}
+                  onBillings={() => router.push('/billings')}
+                  onAdminSubscriptions={() => router.push('/admin/subscription-test')}
                 />
               </>
             ) : (
@@ -625,7 +672,7 @@ export default function LandingPage() {
 
         <div style={s.plansGrid}>
           {PLANS.map((p) => (
-            <PlanCard key={p.id} plan={p} onSelect={handlePlanSelect} />
+            <PlanCard key={p.id} plan={p} onSelect={handlePlanSelect} isCurrentPro={isPro} />
           ))}
         </div>
 

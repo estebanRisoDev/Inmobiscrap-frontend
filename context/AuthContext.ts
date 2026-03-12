@@ -25,14 +25,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const userRef = useRef<AuthUser | null>(null);
 
-  // Mantener ref sincronizado con state
   useEffect(() => { userRef.current = user; }, [user]);
 
   useEffect(() => {
     if (isLoggedIn()) {
       const cached = getUser();
       if (cached) {
+        // Mostrar datos cacheados inmediatamente para UI rápida
         setUserState(cached);
+
+        // ═══════════════════════════════════════════════════════════
+        // FIX: SIEMPRE refrescar créditos desde el servidor al montar.
+        // Antes solo leía localStorage, así que si el webhook actualizó
+        // los créditos en la DB, el frontend nunca se enteraba.
+        // ═══════════════════════════════════════════════════════════
+        axios
+          .get(`${API_BASE}/api/auth/credits`, {
+            headers: { Authorization: `Bearer ${getToken()}` },
+          })
+          .then(({ data }) => {
+            const updated = { ...cached, credits: data.credits, plan: data.plan, role: data.role };
+            setUser(updated);
+            setUserState(updated);
+          })
+          .catch(() => {
+            // Si falla (ej: token expirado), mantener cache
+          });
       } else {
         axios
           .get(`${API_BASE}/api/auth/me`, {
@@ -86,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUserState(updated);
       }
     } catch { /* silenciar */ }
-  }, []); // ← Sin dependencias: estable para siempre
+  }, []);
 
   const isPro   = user?.plan === 'pro';
   const isAdmin = user?.role === 'admin';
