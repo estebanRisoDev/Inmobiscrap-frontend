@@ -12,6 +12,7 @@ import {
   ToggleButton, ToggleButtonGroup, LinearProgress, Tooltip,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   TableSortLabel, TablePagination, Checkbox,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -53,6 +54,8 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import AccessTimeIcon    from '@mui/icons-material/AccessTime';
 import CheckCircleIcon   from '@mui/icons-material/CheckCircle';
 import BarChartIcon      from '@mui/icons-material/BarChart';
+import HistoryIcon       from '@mui/icons-material/History';
+import CloseIcon         from '@mui/icons-material/Close';
 import { useRouter }     from 'next/navigation';
 import { useAuth }       from '@/context/AuthContext';
 import { authHeaders }   from '@/lib/auth';
@@ -174,6 +177,7 @@ interface PropertyMetricItem {
   listingStatus: string | null;
   sourceUrl: string | null;
   daysOnMarket: number | null;
+  daysOnMarketSource: 'publicationDate' | 'firstSeenAt' | null;
   pricePerSqm: number | null;
 }
 
@@ -187,6 +191,36 @@ interface PropertyListResponse {
 
 interface CompareResponse {
   properties: PropertyMetricItem[];
+}
+
+interface TimelineSnapshot {
+  id: number;
+  scrapedAt: string;
+  botId: number;
+  price: number | null;
+  currency: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  area: number | null;
+  propertyType: string | null;
+  title: string | null;
+  hasChanges: boolean;
+  changedFields: string | null;
+}
+
+interface PropertyTimeline {
+  property: {
+    id: number; title: string; sourceUrl: string | null;
+    price: number | null; previousPrice: number | null; currency: string | null;
+    city: string | null; region: string | null; neighborhood: string | null;
+    firstSeenAt: string | null; lastSeenAt: string | null;
+    timesScraped: number; listingStatus: string | null; priceChangedAt: string | null;
+  };
+  totalSnapshots: number;
+  snapshotsWithChanges: number;
+  firstSeen: string | null;
+  lastSeen: string | null;
+  snapshots: TimelineSnapshot[];
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -568,6 +602,11 @@ export default function Dashboard() {
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<Set<number>>(new Set());
   const [compareData, setCompareData]       = useState<CompareResponse | null>(null);
   const [loadingCompare, setLoadingCompare] = useState(false);
+  const [compareTimelines, setCompareTimelines] = useState<Map<number, PropertyTimeline>>(new Map());
+  const [loadingCompareTimelines, setLoadingCompareTimelines] = useState(false);
+  const [timelineOpen,    setTimelineOpen]    = useState(false);
+  const [timelineData,    setTimelineData]    = useState<PropertyTimeline | null>(null);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
 
   const [locations, setLocations] = useState<Locations>({
     regions: [], cities: [], neighborhoods: [], propertyTypes: [],
@@ -777,9 +816,49 @@ export default function Dashboard() {
     finally { setLoadingCompare(false); }
   }, [selectedPropertyIds]);
 
+  // ── Timelines para comparación (evolución en el tiempo) ───────
+  const fetchCompareTimelines = useCallback(async (ids: number[]) => {
+    if (ids.length < 2) { setCompareTimelines(new Map()); return; }
+    setLoadingCompareTimelines(true);
+    try {
+      const results = await Promise.allSettled(
+        ids.map(id => axios.get(`${API_BASE_URL}/api/properties/${id}/timeline`, { headers: authHeaders() }))
+      );
+      const map = new Map<number, PropertyTimeline>();
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') map.set(ids[i], r.value.data);
+      });
+      setCompareTimelines(map);
+    } catch { /* silent */ }
+    finally { setLoadingCompareTimelines(false); }
+  }, []);
+
+  // ── Timeline individual de propiedad ──────────────────────────
+  const fetchTimeline = useCallback(async (propertyId: number) => {
+    setLoadingTimeline(true);
+    setTimelineData(null);
+    setTimelineOpen(true);
+    try {
+      const { data } = await axios.get(
+        `${API_BASE_URL}/api/properties/${propertyId}/timeline`,
+        { headers: authHeaders() },
+      );
+      setTimelineData(data);
+    } catch { /* silent */ }
+    finally { setLoadingTimeline(false); }
+  }, []);
+
   useEffect(() => { if (metricsMode === 'general') fetchGeneralMetrics(); }, [metricsMode, fetchGeneralMetrics]);
   useEffect(() => { if (metricsMode === 'individual') fetchPropertyList(); }, [metricsMode, fetchPropertyList]);
-  useEffect(() => { if (selectedPropertyIds.size >= 2) fetchCompareData(); else setCompareData(null); }, [selectedPropertyIds, fetchCompareData]);
+  useEffect(() => {
+    if (selectedPropertyIds.size >= 2) {
+      fetchCompareData();
+      fetchCompareTimelines(Array.from(selectedPropertyIds));
+    } else {
+      setCompareData(null);
+      setCompareTimelines(new Map());
+    }
+  }, [selectedPropertyIds, fetchCompareData, fetchCompareTimelines]);
 
   // Metrics helpers
   const handleMetricsSort = (col: string) => {
@@ -808,6 +887,48 @@ export default function Dashboard() {
     });
   };
   const atMaxSelection = selectedPropertyIds.size >= MAX_COMPARE;
+
+  // Price evolution over time (multi-property)
+  const comparePriceEvolutionData = useMemo(() => {
+    if (!compareData?.properties?.length || compareTimelines.size === 0) return { series: [], labels: [] };
+
+    const props = compareData.properties;
+    // Build per-property price series (deduplicated by day)
+    const perProp: Array<{ key: string; label: string; points: Map<string, number> }> = props.map((p, i) => {
+      const tl = compareTimelines.get(p.id);
+      const points = new Map<string, number>();
+      if (tl) {
+        tl.snapshots
+          .filter(s => s.price != null && s.price > 0)
+          .forEach(s => {
+            const dayKey = new Date(s.scrapedAt).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' });
+            // last snapshot of the day wins
+            points.set(dayKey, s.price!);
+          });
+      }
+      return { key: `P${i + 1}`, label: `P${i + 1}: ${(p.title ?? '').substring(0, 22)}${(p.title ?? '').length > 22 ? '…' : ''}`, points };
+    });
+
+    // Collect and sort all date labels
+    const allDates = Array.from(new Set(perProp.flatMap(pp => Array.from(pp.points.keys()))))
+      .sort((a, b) => {
+        // parse es-CL date labels back to comparable value
+        const parse = (s: string) => {
+          const [d, m, y] = s.split(' ');
+          const months: Record<string, number> = { ene: 0, feb: 1, mar: 2, abr: 3, may: 4, jun: 5, jul: 6, ago: 7, sep: 8, oct: 9, nov: 10, dic: 11 };
+          return new Date(parseInt(y), months[m?.toLowerCase()] ?? 0, parseInt(d)).getTime();
+        };
+        return parse(a) - parse(b);
+      });
+
+    const merged = allDates.map(date => {
+      const row: Record<string, string | number | null> = { date };
+      perProp.forEach(pp => { row[pp.key] = pp.points.get(date) ?? null; });
+      return row;
+    });
+
+    return { series: perProp, labels: allDates, data: merged };
+  }, [compareData, compareTimelines]);
 
   // Comparison chart data
   const comparisonBarData = useMemo(() => {
@@ -1072,6 +1193,7 @@ export default function Dashboard() {
   // ── Render ────────────────────────────────────────────────────────
 
   return (
+    <>
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
 
       {/* ─── Header ─── */}
@@ -2136,6 +2258,7 @@ export default function Dashboard() {
                             </TableSortLabel>
                           </TableCell>
                         ))}
+                        <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Historial</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Link</TableCell>
                       </TableRow>
                     </TableHead>
@@ -2181,8 +2304,29 @@ export default function Dashboard() {
                             </Typography>
                           </TableCell>
                           <TableCell><Typography variant="caption">{p.city ?? '—'}</Typography></TableCell>
-                          <TableCell><Typography variant="caption">{formatDate(p.publicationDate)}</Typography></TableCell>
+                          <TableCell>
+                            {p.publicationDate ? (
+                              <Typography variant="caption">{formatDate(p.publicationDate)}</Typography>
+                            ) : (
+                              <Tooltip title="Fecha de publicación desconocida — estimado desde fecha de detección">
+                                <Typography variant="caption" sx={{ color: COLORS.mutedText, fontStyle: 'italic' }}>
+                                  ~{formatDate(p.firstSeenAt)}
+                                </Typography>
+                              </Tooltip>
+                            )}
+                          </TableCell>
                           <TableCell><Typography variant="caption">{formatDate(p.firstSeenAt)}</Typography></TableCell>
+                          <TableCell>
+                            <Tooltip title={p.timesScraped > 1 ? 'Ver historial de precios' : 'Solo 1 snapshot disponible'}>
+                              <span>
+                                <IconButton size="small"
+                                  onClick={e => { e.stopPropagation(); fetchTimeline(p.id); }}
+                                  sx={{ color: p.timesScraped > 1 ? COLORS.primary : COLORS.mutedText }}>
+                                  <HistoryIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </TableCell>
                           <TableCell>
                             {p.sourceUrl && (
                               <IconButton size="small" onClick={e => { e.stopPropagation(); window.open(p.sourceUrl!, '_blank'); }}>
@@ -2194,7 +2338,7 @@ export default function Dashboard() {
                       ))}
                       {(!propertyList?.items || propertyList.items.length === 0) && (
                         <TableRow>
-                          <TableCell colSpan={13} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
+                          <TableCell colSpan={14} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
                             No se encontraron propiedades con los filtros aplicados
                           </TableCell>
                         </TableRow>
@@ -2253,8 +2397,15 @@ export default function Dashboard() {
                             <Typography variant="caption">{p.area ? `${p.area} m²` : '—'}</Typography>
                             <Typography variant="caption" color="textSecondary">Ciudad:</Typography>
                             <Typography variant="caption">{p.city ?? '—'}</Typography>
-                            <Typography variant="caption" color="textSecondary">Días publicado:</Typography>
-                            <Typography variant="caption">{p.daysOnMarket ?? '—'}</Typography>
+                            <Typography variant="caption" color="textSecondary">
+                              Días{p.daysOnMarketSource === 'firstSeenAt' ? ' (est.)' : ' publicado'}:
+                            </Typography>
+                            <Tooltip title={p.daysOnMarketSource === 'firstSeenAt' ? 'Estimado desde fecha de detección (sin fecha de publicación)' : ''} disableHoverListener={p.daysOnMarketSource !== 'firstSeenAt'}>
+                              <Typography variant="caption" sx={{ fontStyle: p.daysOnMarketSource === 'firstSeenAt' ? 'italic' : 'normal', color: p.daysOnMarketSource === 'firstSeenAt' ? COLORS.mutedText : 'inherit' }}>
+                                {p.daysOnMarket != null ? `~${p.daysOnMarket}` : '—'}
+                                {p.daysOnMarketSource === 'firstSeenAt' ? ' *' : ''}
+                              </Typography>
+                            </Tooltip>
                           </Box>
                         </CardContent>
                       </Card>
@@ -2364,6 +2515,92 @@ export default function Dashboard() {
                       </ResponsiveContainer>
                     </ChartPaper>
                   </Box>
+
+                  {/* ─── Evolución de precio en el tiempo ─── */}
+                  <ChartPaper sx={{ mb: 3 }}>
+                    <SectionHeader title="Evolución de precio en el tiempo" icon={<TimelineIcon />} />
+                    {loadingCompareTimelines ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress size={28} /></Box>
+                    ) : comparePriceEvolutionData.data && comparePriceEvolutionData.data.length >= 1 ? (
+                      <>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <ComposedChart data={comparePriceEvolutionData.data} margin={{ top: 8, right: 16, left: 8, bottom: 50 }}>
+                            <defs>
+                              {comparePriceEvolutionData.series.map((s, i) => (
+                                <linearGradient key={s.key} id={`grad-cmp-${i}`} x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%"  stopColor={PIE_COLORS[i % PIE_COLORS.length]} stopOpacity={0.12} />
+                                  <stop offset="95%" stopColor={PIE_COLORS[i % PIE_COLORS.length]} stopOpacity={0} />
+                                </linearGradient>
+                              ))}
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                            <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" height={65} interval="preserveStartEnd" />
+                            <YAxis tick={{ fontSize: 11 }}
+                              domain={[
+                                (dataMin: number) => Math.floor(dataMin * 0.97),
+                                (dataMax: number) => Math.ceil(dataMax * 1.03),
+                              ]}
+                              tickFormatter={v => {
+                                const currency = compareData?.properties[0]?.currency ?? 'CLP';
+                                return currency === 'UF'
+                                  ? `${Number(v).toLocaleString('es-CL', { maximumFractionDigits: 0 })} UF`
+                                  : v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`;
+                              }} />
+                            <RechartTooltip
+                              content={({ active, payload, label: lbl }: any) => {
+                                if (!active || !payload?.length) return null;
+                                return (
+                                  <Paper elevation={4} sx={{ p: 1.5, minWidth: 190, border: '1px solid #e0e0e0' }}>
+                                    <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.75 }}>{lbl}</Typography>
+                                    {payload.filter((e: any) => e.value != null).map((entry: any) => {
+                                      const currency = compareData?.properties[0]?.currency ?? 'CLP';
+                                      const fmtVal = currency === 'UF' ? formatUF(entry.value) : formatCLP(entry.value);
+                                      return (
+                                        <Box key={entry.dataKey} sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.3 }}>
+                                          <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: entry.color, flexShrink: 0 }} />
+                                          <Typography variant="caption" sx={{ color: COLORS.mutedText, minWidth: 30 }}>{entry.dataKey}:</Typography>
+                                          <Typography variant="caption" sx={{ fontWeight: 700 }}>{fmtVal}</Typography>
+                                        </Box>
+                                      );
+                                    })}
+                                  </Paper>
+                                );
+                              }}
+                            />
+                            <Legend />
+                            {comparePriceEvolutionData.series.map((s, i) => {
+                              const color = PIE_COLORS[i % PIE_COLORS.length];
+                              const pointCount = s.points.size;
+                              return (
+                                <Line key={s.key} type="monotone" dataKey={s.key} name={s.label}
+                                  stroke={color} strokeWidth={pointCount === 1 ? 0 : 2.5}
+                                  dot={(dotProps: any) => {
+                                    const { cx, cy, value } = dotProps;
+                                    if (value == null) return <g key={`${cx}-${cy}`} />;
+                                    const r = pointCount === 1 ? 8 : 4;
+                                    return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={r} fill={color} stroke="#fff" strokeWidth={2} />;
+                                  }}
+                                  connectNulls activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }} />
+                              );
+                            })}
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                        <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', mt: 0.5, textAlign: 'center' }}>
+                          Cada punto representa el último precio registrado ese día por scraping.
+                        </Typography>
+                      </>
+                    ) : (
+                      <Box sx={{ py: 4, textAlign: 'center' }}>
+                        <TimelineIcon sx={{ fontSize: 40, color: COLORS.mutedText, mb: 1 }} />
+                        <Typography variant="body2" sx={{ color: COLORS.mutedText }}>
+                          Las propiedades seleccionadas no tienen suficiente historial de precios para mostrar evolución en el tiempo.
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+                          Se necesitan al menos 2 snapshots con precio por propiedad.
+                        </Typography>
+                      </Box>
+                    )}
+                  </ChartPaper>
                 </>
               )}
             </>
@@ -2371,5 +2608,264 @@ export default function Dashboard() {
         </>
       )}
     </Box>
+
+    {/* ─── MODAL: Historial de propiedad ─── */}
+    <Dialog open={timelineOpen} onClose={() => setTimelineOpen(false)} maxWidth="md" fullWidth
+      PaperProps={{ sx: { borderRadius: 3 } }}>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, pr: 1 }}>
+        <HistoryIcon sx={{ color: COLORS.primary }} />
+        <Box sx={{ flex: 1, overflow: 'hidden' }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {timelineData?.property.title ?? 'Historial de propiedad'}
+          </Typography>
+          {timelineData?.property.city && (
+            <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+              {[timelineData.property.neighborhood, timelineData.property.city].filter(Boolean).join(', ')}
+            </Typography>
+          )}
+        </Box>
+        <IconButton size="small" onClick={() => setTimelineOpen(false)}>
+          <CloseIcon fontSize="small" />
+        </IconButton>
+      </DialogTitle>
+
+      <DialogContent dividers sx={{ p: 0 }}>
+        {loadingTimeline ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+            <CircularProgress />
+          </Box>
+        ) : timelineData ? (() => {
+          const prop = timelineData.property;
+          const snaps = timelineData.snapshots;
+
+          // Construir serie de precios: solo snapshots con precio válido
+          type PricePoint = { date: Date; price: number; hasChanges: boolean; changedFields: string | null; label: string; labelFull: string };
+          const priceSeries = snaps
+            .filter(s => s.price != null && s.price > 0)
+            .map(s => ({
+              date: new Date(s.scrapedAt),
+              price: s.price!,
+              hasChanges: s.hasChanges,
+              changedFields: s.changedFields,
+              label: new Date(s.scrapedAt).toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' }),
+              labelFull: new Date(s.scrapedAt).toLocaleString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+            }))
+            // Deduplicar por día si hay muchos
+            .reduce<PricePoint[]>((acc, cur) => {
+              const last = acc[acc.length - 1];
+              if (!last || last.label !== cur.label) acc.push(cur);
+              else if (cur.hasChanges) acc[acc.length - 1] = cur;
+              return acc;
+            }, []);
+
+          const hasPriceHistory = priceSeries.length >= 2;
+          const currency = prop.currency ?? (snaps[0]?.currency ?? 'CLP');
+          const isUF = currency.toUpperCase() === 'UF';
+          const fmt = (v: number | null | undefined) => isUF ? formatUF(v) : formatCLP(v);
+
+          // Calcular variación total de precio
+          const firstPrice = priceSeries[0]?.price;
+          const lastPrice  = priceSeries[priceSeries.length - 1]?.price;
+          const priceDelta = firstPrice && lastPrice ? lastPrice - firstPrice : null;
+          const pricePct   = firstPrice && priceDelta != null ? (priceDelta / firstPrice) * 100 : null;
+
+          return (
+            <Box sx={{ p: 2.5 }}>
+              {/* Stats row */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 1.5, mb: 2.5 }}>
+                {[
+                  { label: 'Precio actual', value: fmt(prop.price), icon: <AttachMoneyIcon sx={{ fontSize: 18, color: COLORS.primary }} /> },
+                  { label: 'Veces scrapeado', value: prop.timesScraped.toLocaleString(), icon: <TimelineIcon sx={{ fontSize: 18, color: COLORS.accent }} /> },
+                  { label: 'Snapshots con cambios', value: timelineData.snapshotsWithChanges.toLocaleString(), icon: <ChangeCircleIcon sx={{ fontSize: 18, color: COLORS.warning }} /> },
+                  { label: 'Detectado', value: formatDate(prop.firstSeenAt), icon: <CalendarTodayIcon sx={{ fontSize: 18, color: COLORS.success }} /> },
+                  { label: 'Último visto', value: formatDate(prop.lastSeenAt), icon: <AccessTimeIcon sx={{ fontSize: 18, color: COLORS.mutedText }} /> },
+                ].map(({ label, value, icon }) => (
+                  <Paper key={label} elevation={0} sx={{ p: 1.5, borderRadius: 2, border: '1px solid #e9ecef', display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                    {icon}
+                    <Box>
+                      <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', lineHeight: 1.2 }}>{label}</Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 700, color: COLORS.darkText }}>{value}</Typography>
+                    </Box>
+                  </Paper>
+                ))}
+              </Box>
+
+              {/* Precio anterior si hubo cambio */}
+              {prop.previousPrice != null && prop.previousPrice !== prop.price && (
+                <Paper elevation={0} sx={{ px: 2, py: 1.25, mb: 2, borderRadius: 2,
+                  bgcolor: priceDelta != null && priceDelta < 0 ? '#f0fdf4' : '#fef2f2',
+                  border: `1px solid ${priceDelta != null && priceDelta < 0 ? '#bbf7d0' : '#fecaca'}`,
+                  display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  {priceDelta != null && priceDelta < 0
+                    ? <TrendingDownIcon sx={{ color: COLORS.up }} />
+                    : <TrendingUpIcon  sx={{ color: COLORS.down }} />}
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Cambio de precio detectado:{' '}
+                    <span style={{ textDecoration: 'line-through', color: COLORS.mutedText }}>{fmt(prop.previousPrice)}</span>
+                    {' → '}
+                    <span style={{ color: priceDelta != null && priceDelta < 0 ? COLORS.up : COLORS.down, fontWeight: 700 }}>{fmt(prop.price)}</span>
+                    {pricePct != null && (
+                      <span style={{ marginLeft: 8, fontSize: '0.8rem' }}>({pricePct > 0 ? '+' : ''}{pricePct.toFixed(1)}%)</span>
+                    )}
+                  </Typography>
+                  {prop.priceChangedAt && (
+                    <Typography variant="caption" sx={{ ml: 'auto', color: COLORS.mutedText }}>
+                      {formatDate(prop.priceChangedAt)}
+                    </Typography>
+                  )}
+                </Paper>
+              )}
+
+              {/* Gráfico de evolución de precios */}
+              {hasPriceHistory ? (
+                <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                    <TrendingUpIcon sx={{ color: COLORS.primary, fontSize: 18 }} />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700, color: COLORS.darkText }}>
+                      Evolución de precio ({priceSeries.length} puntos)
+                    </Typography>
+                    {pricePct != null && (
+                      <Chip size="small"
+                        label={`${pricePct > 0 ? '+' : ''}${pricePct.toFixed(1)}% total`}
+                        sx={{
+                          ml: 'auto', fontWeight: 700, fontSize: '0.7rem',
+                          bgcolor: pricePct < 0 ? '#f0fdf4' : pricePct > 0 ? '#fef2f2' : '#f1f5f9',
+                          color:   pricePct < 0 ? COLORS.up     : pricePct > 0 ? COLORS.down     : COLORS.mutedText,
+                        }} />
+                    )}
+                  </Box>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <ComposedChart data={priceSeries} margin={{ top: 8, right: 16, left: 8, bottom: 40 }}>
+                      <defs>
+                        <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor={COLORS.primary} stopOpacity={0.18} />
+                          <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" height={60} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 11 }}
+                        tickFormatter={v => isUF
+                          ? `${v.toLocaleString('es-CL', { maximumFractionDigits: 0 })} UF`
+                          : v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`} />
+                      <RechartTooltip
+                        content={({ active, payload, label: lbl }: any) => {
+                          if (!active || !payload?.length) return null;
+                          const pt = payload[0]?.payload;
+                          return (
+                            <Paper elevation={4} sx={{ p: 1.5, minWidth: 180, border: '1px solid #e0e0e0' }}>
+                              <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>{pt?.labelFull ?? lbl}</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700, color: COLORS.primary }}>
+                                {fmt(pt?.price)}
+                              </Typography>
+                              {pt?.hasChanges && pt?.changedFields && (
+                                <Typography variant="caption" sx={{ color: COLORS.warning, display: 'block', mt: 0.5 }}>
+                                  Cambios: {pt.changedFields}
+                                </Typography>
+                              )}
+                            </Paper>
+                          );
+                        }}
+                      />
+                      <Area type="monotone" dataKey="price" name="Precio"
+                        stroke={COLORS.primary} strokeWidth={2}
+                        fill="url(#priceGrad)" dot={false} activeDot={false} />
+                      <Line type="monotone" dataKey="price" name="Precio"
+                        stroke={COLORS.primary} strokeWidth={2.5} dot={(dotProps: any) => {
+                          const { cx, cy, payload } = dotProps;
+                          return (
+                            <circle key={`dot-${cx}-${cy}`}
+                              cx={cx} cy={cy} r={payload.hasChanges ? 6 : 3.5}
+                              fill={payload.hasChanges ? COLORS.warning : COLORS.primary}
+                              stroke="#fff" strokeWidth={1.5} />
+                          );
+                        }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                  <Box sx={{ display: 'flex', gap: 2, mt: 0.5, flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: COLORS.primary, border: '1.5px solid #fff', boxShadow: '0 0 0 1px #0f4c81' }} />
+                      <Typography variant="caption" sx={{ color: COLORS.mutedText }}>Sin cambios</Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                      <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: COLORS.warning, border: '1.5px solid #fff', boxShadow: `0 0 0 1px ${COLORS.warning}` }} />
+                      <Typography variant="caption" sx={{ color: COLORS.mutedText }}>Cambio detectado</Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              ) : (
+                <Paper elevation={0} sx={{ p: 3, textAlign: 'center', borderRadius: 2, bgcolor: '#f8f9fa', border: '1px dashed #dee2e6' }}>
+                  <TimelineIcon sx={{ fontSize: 40, color: COLORS.mutedText, mb: 1 }} />
+                  <Typography variant="body2" sx={{ color: COLORS.mutedText }}>
+                    {priceSeries.length === 1
+                      ? 'Solo hay 1 observación de precio. Se necesitan al menos 2 para mostrar evolución.'
+                      : 'Esta propiedad aún no tiene historial de precios registrado.'}
+                  </Typography>
+                  {priceSeries.length === 1 && (
+                    <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', mt: 0.5 }}>
+                      Precio observado: <strong>{fmt(priceSeries[0]?.price)}</strong> el {priceSeries[0]?.label}
+                    </Typography>
+                  )}
+                </Paper>
+              )}
+
+              {/* Tabla resumen de snapshots con cambios */}
+              {timelineData.snapshotsWithChanges > 0 && (
+                <Box sx={{ mt: 2.5 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: COLORS.darkText, display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                    <ChangeCircleIcon sx={{ fontSize: 16, color: COLORS.warning }} />
+                    Snapshots con cambios detectados
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                    {snaps
+                      .filter(s => s.hasChanges && s.changedFields)
+                      .map(s => (
+                        <Paper key={s.id} elevation={0} sx={{
+                          px: 1.75, py: 1, borderRadius: 1.5,
+                          border: '1px solid #fde68a', bgcolor: '#fffbeb',
+                          display: 'flex', alignItems: 'center', gap: 1.5,
+                        }}>
+                          <ChangeCircleIcon sx={{ fontSize: 16, color: COLORS.warning, flexShrink: 0 }} />
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="caption" sx={{ color: COLORS.mutedText }}>
+                              {new Date(s.scrapedAt).toLocaleString('es-CL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                              Campos: {s.changedFields}
+                            </Typography>
+                          </Box>
+                          {s.price != null && (
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: COLORS.primary, flexShrink: 0 }}>
+                              {fmt(s.price)}
+                            </Typography>
+                          )}
+                        </Paper>
+                      ))}
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          );
+        })() : (
+          <Box sx={{ p: 4, textAlign: 'center' }}>
+            <Typography color="textSecondary">No se pudo cargar el historial.</Typography>
+          </Box>
+        )}
+      </DialogContent>
+
+      <DialogActions sx={{ px: 2.5, py: 1.5, gap: 1 }}>
+        {timelineData?.property.sourceUrl && (
+          <Button size="small" startIcon={<OpenInNewIcon />}
+            onClick={() => window.open(timelineData.property.sourceUrl!, '_blank')}
+            sx={{ textTransform: 'none' }}>
+            Ver publicación
+          </Button>
+        )}
+        <Button size="small" onClick={() => setTimelineOpen(false)} sx={{ textTransform: 'none', ml: 'auto' }}>
+          Cerrar
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </>
   );
 }
