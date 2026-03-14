@@ -18,6 +18,7 @@ import PeopleIcon       from '@mui/icons-material/People';
 import ShowChartIcon    from '@mui/icons-material/ShowChart';
 import CloseIcon        from '@mui/icons-material/Close';
 import SmartToyIcon     from '@mui/icons-material/SmartToy';
+import SellIcon         from '@mui/icons-material/Sell';
 import {
   AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -300,7 +301,7 @@ export default function Home() {
   });
 
   const router = useRouter();
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isPro } = useAuth();
 
   const fetchBots = useCallback(async () => {
     setLoading(true);
@@ -540,6 +541,16 @@ export default function Home() {
                 boxShadow: '0 3px 5px 2px rgba(25, 118, 210, .3)',
               }}>
               Ver Dashboard
+            </Button>
+
+            <Button variant="contained" startIcon={<SellIcon />}
+              onClick={() => router.push('/vendidos')}
+              sx={{
+                textTransform: 'none', borderRadius: 2, px: 3,
+                background: 'linear-gradient(45deg, #e76f51 30%, #f4a261 90%)',
+                boxShadow: '0 3px 5px 2px rgba(231,111,81,.2)',
+              }}>
+              Vendidos
             </Button>
 
             <Button variant="contained" startIcon={<AddIcon />}

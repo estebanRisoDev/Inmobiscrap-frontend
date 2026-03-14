@@ -13,6 +13,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   TableSortLabel, TablePagination, Checkbox,
   Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, InputAdornment, Popover,
 } from '@mui/material';
 import {
   BarChart, Bar, PieChart, Pie, Cell,
@@ -44,6 +45,7 @@ import TokenIcon         from '@mui/icons-material/Token';
 import TimelineIcon      from '@mui/icons-material/Timeline';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import SellIcon          from '@mui/icons-material/Sell';
 import ChangeCircleIcon  from '@mui/icons-material/ChangeCircle';
 import NewReleasesIcon   from '@mui/icons-material/NewReleases';
 import CompareIcon       from '@mui/icons-material/Compare';
@@ -56,12 +58,30 @@ import CheckCircleIcon   from '@mui/icons-material/CheckCircle';
 import BarChartIcon      from '@mui/icons-material/BarChart';
 import HistoryIcon       from '@mui/icons-material/History';
 import CloseIcon         from '@mui/icons-material/Close';
+import SearchIcon        from '@mui/icons-material/Search';
 import { useRouter }     from 'next/navigation';
 import { useAuth }       from '@/context/AuthContext';
 import { authHeaders }   from '@/lib/auth';
 
 const API_BASE_URL = 'http://localhost:5000';
 const INITIAL_CREDITS = 50;
+
+// ── Column filter config ────────────────────────────────────────────────────────
+type ColFilterType = 'text' | 'range' | 'exact';
+interface ColFilterCfg { type: ColFilterType; inputType?: 'text' | 'number' | 'date'; keys: string[]; labels?: string[] }
+const COL_FILTER_CONFIG: Record<string, ColFilterCfg> = {
+  title:           { type: 'text',  inputType: 'text',   keys: ['titleSearch'],                          labels: ['Buscar en título'] },
+  price:           { type: 'range', inputType: 'number', keys: ['priceMin', 'priceMax'],                 labels: ['Precio mín.', 'Precio máx.'] },
+  propertyType:    { type: 'text',  inputType: 'text',   keys: ['propertyTypeSearch'],                   labels: ['Buscar tipo'] },
+  condition:       { type: 'text',  inputType: 'text',   keys: ['conditionSearch'],                      labels: ['Buscar estado'] },
+  bedrooms:        { type: 'exact', inputType: 'number', keys: ['bedrooms'],                             labels: ['N° exacto de dorm.'] },
+  bathrooms:       { type: 'exact', inputType: 'number', keys: ['bathrooms'],                            labels: ['N° exacto de baños'] },
+  area:            { type: 'range', inputType: 'number', keys: ['areaMin', 'areaMax'],                   labels: ['m² mín.', 'm² máx.'] },
+  pricepersqm:     { type: 'range', inputType: 'number', keys: ['pricePerSqmMin', 'pricePerSqmMax'],     labels: ['P/m² mín.', 'P/m² máx.'] },
+  city:            { type: 'text',  inputType: 'text',   keys: ['citySearch'],                           labels: ['Buscar ciudad'] },
+  publicationdate: { type: 'range', inputType: 'date',   keys: ['pubDateFrom', 'pubDateTo'],             labels: ['Desde', 'Hasta'] },
+  firstseenat:     { type: 'range', inputType: 'date',   keys: ['firstSeenFrom', 'firstSeenTo'],         labels: ['Desde', 'Hasta'] },
+};
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -179,6 +199,7 @@ interface PropertyMetricItem {
   daysOnMarket: number | null;
   daysOnMarketSource: 'publicationDate' | 'firstSeenAt' | null;
   pricePerSqm: number | null;
+  isArriendo: boolean | null;
 }
 
 interface PropertyListResponse {
@@ -599,6 +620,10 @@ export default function Dashboard() {
   const [metricsPageSize, setMetricsPageSize] = useState(25);
   const [metricsCondition, setMetricsCondition] = useState('');
   const [metricsCurrency, setMetricsCurrency]   = useState('');
+  const [metricsArriendo, setMetricsArriendo]   = useState<'' | 'true' | 'false'>('');
+  const [colFilters, setColFilters]             = useState<Record<string, string>>({});
+  const [filterAnchor, setFilterAnchor]         = useState<HTMLElement | null>(null);
+  const [filterColId, setFilterColId]           = useState<string | null>(null);
   const [selectedPropertyIds, setSelectedPropertyIds] = useState<Set<number>>(new Set());
   const [compareData, setCompareData]       = useState<CompareResponse | null>(null);
   const [loadingCompare, setLoadingCompare] = useState(false);
@@ -798,11 +823,14 @@ export default function Dashboard() {
       if (committed.propertyType) params.propertyType = committed.propertyType;
       if (metricsCondition)       params.condition = metricsCondition;
       if (metricsCurrency)        params.currency = metricsCurrency;
+      if (metricsArriendo !== '') params.isArriendo = metricsArriendo;
+      // Column-level filters
+      Object.entries(colFilters).forEach(([k, v]) => { if (v) params[k] = v; });
       const { data } = await axios.get(`${API_BASE_URL}/api/metrics/properties`, { params, headers: authHeaders() });
       setPropertyList(data);
     } catch { /* silent */ }
     finally { setLoadingPropertyList(false); }
-  }, [committed, metricsSortBy, metricsSortDir, metricsPage, metricsPageSize, metricsCondition, metricsCurrency]);
+  }, [committed, metricsSortBy, metricsSortDir, metricsPage, metricsPageSize, metricsCondition, metricsCurrency, metricsArriendo, colFilters]);
 
   // ── Métricas: Comparación ──────────────────────────────────────
   const fetchCompareData = useCallback(async () => {
@@ -865,6 +893,28 @@ export default function Dashboard() {
     if (metricsSortBy === col) setMetricsSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setMetricsSortBy(col); setMetricsSortDir('asc'); }
     setMetricsPage(0);
+  };
+  const handleColFilterChange = (key: string, value: string) => {
+    setColFilters(prev => {
+      const next = { ...prev };
+      if (value) next[key] = value; else delete next[key];
+      return next;
+    });
+    setMetricsPage(0);
+  };
+  const clearColFilter = (colId: string) => {
+    const cfg = COL_FILTER_CONFIG[colId];
+    if (!cfg) return;
+    setColFilters(prev => {
+      const next = { ...prev };
+      cfg.keys.forEach(k => delete next[k]);
+      return next;
+    });
+    setMetricsPage(0);
+  };
+  const colHasFilter = (colId: string) => {
+    const cfg = COL_FILTER_CONFIG[colId];
+    return cfg ? cfg.keys.some(k => !!colFilters[k]) : false;
   };
   const MAX_COMPARE = 20;
   const togglePropertySelect = (id: number) => {
@@ -1023,13 +1073,20 @@ export default function Dashboard() {
   const clearFilters = () => { setStaged(EMPTY_FILTERS); setCommitted(EMPTY_FILTERS); };
 
   // ── Datos derivados ────────────────────────────────────────────
-  const propertyTypeStats = useMemo(() =>
-    (marketData?.byType ?? []).map((t) => ({
-      ...t,
-      type:  normalizePropertyType(t.type),
-      color: PROPERTY_TYPE_COLORS[normalizePropertyType(t.type)] || '#adb5bd',
-    })).sort((a, b) => b.count - a.count),
-    [marketData]);
+  const propertyTypeStats = useMemo(() => {
+    const merged = new Map<string, any>();
+    for (const t of (marketData?.byType ?? [])) {
+      const normType = normalizePropertyType(t.type);
+      const key = `${normType}||${t.currency ?? ''}`;
+      const existing = merged.get(key);
+      if (existing) {
+        existing.count += t.count;
+      } else {
+        merged.set(key, { ...t, type: normType, color: PROPERTY_TYPE_COLORS[normType] || '#adb5bd' });
+      }
+    }
+    return [...merged.values()].sort((a, b) => b.count - a.count);
+  }, [marketData]);
 
   const globalAverages = useMemo(() => ({
     avgBedrooms:  marketData?.globalAverages?.avgBedrooms  ?? 0,
@@ -1197,7 +1254,7 @@ export default function Dashboard() {
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
 
       {/* ─── Header ─── */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
         {/* Left: Title */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBackIcon />}
@@ -1218,7 +1275,7 @@ export default function Dashboard() {
         </Box>
 
         {/* Right: User + Buttons */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end', ml: 'auto', whiteSpace: 'nowrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, justifyContent: 'flex-end', ml: 'auto', flexWrap: 'wrap' }}>
           {user && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Avatar src={user.avatarUrl} sx={{ width: 36, height: 36, bgcolor: COLORS.primary, fontSize: '0.85rem' }}>
@@ -1234,12 +1291,21 @@ export default function Dashboard() {
             </Box>
           )}
           {isAdmin && (
-            <Button variant="contained" startIcon={<SmartToyIcon />}
+            <Button variant="contained" size="small" startIcon={<SmartToyIcon />}
               onClick={() => router.push('/botdashboard')}
-              sx={{ textTransform: 'none', borderRadius: 2, px: 3,
+              sx={{ textTransform: 'none', borderRadius: 2, px: 2,
                     background: 'linear-gradient(45deg, #dc2626 30%, #ef4444 90%)',
                     boxShadow: '0 3px 5px 2px rgba(220,38,38,.2)' }}>
-              Gestión de Bots
+              Bots
+            </Button>
+          )}
+          {(isAdmin || isPro) && (
+            <Button variant="contained" size="small" startIcon={<SellIcon />}
+              onClick={() => router.push('/vendidos')}
+              sx={{ textTransform: 'none', borderRadius: 2, px: 2,
+                    background: 'linear-gradient(45deg, #e76f51 30%, #f4a261 90%)',
+                    boxShadow: '0 3px 5px 2px rgba(231,111,81,.2)' }}>
+              Vendidos
             </Button>
           )}
 
@@ -1264,14 +1330,18 @@ export default function Dashboard() {
             </span>
           </Tooltip>
 
-          <Button variant="contained"
-            startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />}
-            onClick={fetchDashboardData}
-            disabled={loading || noCredits}
-            sx={{ bgcolor: COLORS.primary, textTransform: 'none', borderRadius: 2, px: 3,
-                  '&:hover': { bgcolor: '#0a3d68' } }}>
-            Actualizar
-          </Button>
+          <Tooltip title="Actualizar datos" arrow>
+            <span>
+              <IconButton
+                onClick={fetchDashboardData}
+                disabled={loading || noCredits}
+                sx={{ bgcolor: COLORS.primary, color: '#fff', width: 40, height: 40,
+                      '&:hover': { bgcolor: '#0a3d68' },
+                      '&.Mui-disabled': { bgcolor: '#ccc', color: '#fff' } }}>
+                {loading ? <CircularProgress size={18} color="inherit" /> : <RefreshIcon />}
+              </IconButton>
+            </span>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -1746,7 +1816,7 @@ export default function Dashboard() {
               </ResponsiveContainer>
               <Box sx={{ flex: 1 }}>
                 {propertyTypeStats.map((t) => (
-                  <Box key={t.type} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+                  <Box key={`${t.type}-${t.currency ?? ''}`} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
                     <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: t.color, flexShrink: 0 }} />
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.85rem' }}>{t.type}</Typography>
@@ -1812,7 +1882,7 @@ export default function Dashboard() {
                   const ufRows  = propertyTypeStats.filter((t) => (t.currency ?? '').toUpperCase() === 'UF');
                   const clpRows = propertyTypeStats.filter((t) => (t.currency ?? '').toUpperCase() !== 'UF');
                   const renderRow = (t: typeof propertyTypeStats[0]) => (
-                    <tr key={t.type}>
+                    <tr key={`${t.type}-${t.currency ?? ''}`}>
                       <td>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Box sx={{ width: 10, height: 10, borderRadius: '2px', bgcolor: t.color }} />
@@ -2107,17 +2177,26 @@ export default function Dashboard() {
                       });
                       return row;
                     });
-                    const barColors = ['#e0522a', '#2563eb', '#16a34a', '#f59e0b'];
+                    const barColors: Record<string, string> = { CLP: '#2563eb', UF: '#e0522a' };
+                    const fallbackColors = ['#16a34a', '#f59e0b'];
+                    const ufCurrencies = currencies.filter(c => c === 'UF');
+                    const clpCurrencies = currencies.filter(c => c !== 'UF');
                     return (
                       <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={data}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="type" tick={{ fontSize: 11 }} />
-                          <YAxis tick={{ fontSize: 11 }} />
-                          <RechartTooltip />
+                          <YAxis yAxisId="clp" tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v.toLocaleString()} />
+                          {ufCurrencies.length > 0 && (
+                            <YAxis yAxisId="uf" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v.toFixed(0)} UF`} />
+                          )}
+                          <RechartTooltip formatter={(value: number, name: string) => [value.toLocaleString('es-CL'), name]} />
                           <Legend />
-                          {currencies.map((c, i) => (
-                            <Bar key={c} dataKey={c} name={`${c}/m²`} fill={barColors[i % barColors.length]} radius={[4, 4, 0, 0]} />
+                          {clpCurrencies.map((c, i) => (
+                            <Bar key={c} yAxisId="clp" dataKey={c} name={`${c}/m²`} fill={barColors[c] ?? fallbackColors[i % fallbackColors.length]} radius={[4, 4, 0, 0]} />
+                          ))}
+                          {ufCurrencies.map((c, i) => (
+                            <Bar key={c} yAxisId="uf" dataKey={c} name={`${c}/m²`} fill={barColors[c] ?? fallbackColors[i % fallbackColors.length]} radius={[4, 4, 0, 0]} />
                           ))}
                         </BarChart>
                       </ResponsiveContainer>
@@ -2129,15 +2208,41 @@ export default function Dashboard() {
               {(generalMetrics.pricePerSqmByCity?.length ?? 0) > 0 && (
                 <ChartPaper sx={{ mb: 3 }}>
                   <SectionHeader title="Precio/m² por ciudad (Top 20)" icon={<LocationOnIcon />} />
-                  <ResponsiveContainer width="100%" height={Math.max(300, (generalMetrics.pricePerSqmByCity?.length ?? 0) * 30)}>
-                    <BarChart data={generalMetrics.pricePerSqmByCity} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="city" type="category" width={120} tick={{ fontSize: 10 }} />
-                      <RechartTooltip formatter={(v: number) => v.toLocaleString()} />
-                      <Bar dataKey="avg" name="Precio/m² promedio" fill="#e0522a" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {(() => {
+                    const rawCity = generalMetrics.pricePerSqmByCity ?? [];
+                    const currencies = [...new Set(rawCity.map(x => x.currency))];
+                    const cities = [...new Set(rawCity.map(x => x.city))];
+                    const data = cities.map(city => {
+                      const row: Record<string, string | number> = { city };
+                      currencies.forEach(c => {
+                        const item = rawCity.find(x => x.city === city && x.currency === c);
+                        row[c] = item?.avg ?? 0;
+                      });
+                      return row;
+                    });
+                    const clpCurrencies = currencies.filter(c => c !== 'UF');
+                    const ufCurrencies = currencies.filter(c => c === 'UF');
+                    return (
+                      <ResponsiveContainer width="100%" height={Math.max(300, cities.length * 30)}>
+                        <BarChart data={data} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
+                          <XAxis xAxisId="clp" type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v.toLocaleString()} />
+                          {ufCurrencies.length > 0 && (
+                            <XAxis xAxisId="uf" type="number" orientation="top" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v.toFixed(0)} UF`} />
+                          )}
+                          <YAxis dataKey="city" type="category" width={120} tick={{ fontSize: 10 }} />
+                          <RechartTooltip formatter={(value: number, name: string) => [value.toLocaleString('es-CL'), name]} />
+                          <Legend />
+                          {clpCurrencies.map(c => (
+                            <Bar key={c} xAxisId="clp" dataKey={c} name={`${c}/m²`} fill="#2563eb" radius={[0, 4, 4, 0]} />
+                          ))}
+                          {ufCurrencies.map(c => (
+                            <Bar key={c} xAxisId="uf" dataKey={c} name={`${c}/m²`} fill="#e0522a" radius={[0, 4, 4, 0]} />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
                 </ChartPaper>
               )}
 
@@ -2177,7 +2282,7 @@ export default function Dashboard() {
       {metricsMode === 'individual' && (
         <>
           {/* Extra filters for individual mode */}
-          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             <FormControl size="small" sx={{ minWidth: 130 }}>
               <InputLabel>Estado</InputLabel>
               <Select value={metricsCondition} label="Estado"
@@ -2185,6 +2290,15 @@ export default function Dashboard() {
                 <MenuItem value="">Todos</MenuItem>
                 <MenuItem value="Nuevo">Nuevo</MenuItem>
                 <MenuItem value="Usado">Usado</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 130 }}>
+              <InputLabel>Operación</InputLabel>
+              <Select value={metricsArriendo} label="Operación"
+                onChange={e => { setMetricsArriendo(e.target.value as '' | 'true' | 'false'); setMetricsPage(0); }}>
+                <MenuItem value="">Todas</MenuItem>
+                <MenuItem value="false">Venta</MenuItem>
+                <MenuItem value="true">Arriendo</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 120 }}>
@@ -2242,6 +2356,7 @@ export default function Dashboard() {
                           { id: 'price', label: 'Precio', w: 130 },
                           { id: 'propertyType', label: 'Tipo', w: 100 },
                           { id: 'condition', label: 'Estado', w: 85 },
+                          { id: 'isArriendo', label: 'Operación', w: 90 },
                           { id: 'bedrooms', label: 'Dorm.', w: 65 },
                           { id: 'bathrooms', label: 'Baños', w: 65 },
                           { id: 'area', label: 'm²', w: 75 },
@@ -2251,11 +2366,19 @@ export default function Dashboard() {
                           { id: 'firstseenat', label: 'Detectado', w: 100 },
                         ].map(col => (
                           <TableCell key={col.id} sx={{ fontWeight: 700, fontSize: '0.75rem', minWidth: col.w }}>
-                            <TableSortLabel active={metricsSortBy === col.id}
-                              direction={metricsSortBy === col.id ? metricsSortDir : 'asc'}
-                              onClick={() => handleMetricsSort(col.id)}>
-                              {col.label}
-                            </TableSortLabel>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                              <TableSortLabel active={metricsSortBy === col.id}
+                                direction={metricsSortBy === col.id ? metricsSortDir : 'asc'}
+                                onClick={() => handleMetricsSort(col.id)}>
+                                {col.label}
+                              </TableSortLabel>
+                              <Tooltip title={colHasFilter(col.id) ? 'Filtro activo — click para editar' : 'Filtrar'}>
+                                <IconButton size="small" sx={{ p: 0.25, color: colHasFilter(col.id) ? COLORS.primary : COLORS.mutedText }}
+                                  onClick={e => { e.stopPropagation(); setFilterAnchor(e.currentTarget); setFilterColId(col.id); }}>
+                                  <SearchIcon sx={{ fontSize: 13 }} />
+                                </IconButton>
+                              </Tooltip>
+                            </Box>
                           </TableCell>
                         ))}
                         <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Historial</TableCell>
@@ -2294,6 +2417,15 @@ export default function Dashboard() {
                                 color={p.condition === 'Nuevo' ? 'success' : 'warning'}
                                 sx={{ fontSize: '0.7rem', height: 22 }} />
                             ) : '—'}
+                          </TableCell>
+                          <TableCell>
+                            {p.isArriendo === null || p.isArriendo === undefined ? '—' : (
+                              <Chip
+                                label={p.isArriendo ? 'Arriendo' : 'Venta'}
+                                size="small"
+                                color={p.isArriendo ? 'info' : 'default'}
+                                sx={{ fontSize: '0.7rem', height: 22 }} />
+                            )}
                           </TableCell>
                           <TableCell align="center">{p.bedrooms ?? '—'}</TableCell>
                           <TableCell align="center">{p.bathrooms ?? '—'}</TableCell>
@@ -2338,7 +2470,7 @@ export default function Dashboard() {
                       ))}
                       {(!propertyList?.items || propertyList.items.length === 0) && (
                         <TableRow>
-                          <TableCell colSpan={14} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
+                          <TableCell colSpan={15} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
                             No se encontraron propiedades con los filtros aplicados
                           </TableCell>
                         </TableRow>
@@ -2358,6 +2490,64 @@ export default function Dashboard() {
               </>
             )}
           </Paper>
+
+          {/* ─── Column filter Popover ─── */}
+          <Popover
+            open={Boolean(filterAnchor)}
+            anchorEl={filterAnchor}
+            onClose={() => { setFilterAnchor(null); setFilterColId(null); }}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          >
+            {filterColId && COL_FILTER_CONFIG[filterColId] && (() => {
+              const cfg = COL_FILTER_CONFIG[filterColId];
+              const colLabel = { title: 'Título', price: 'Precio', propertyType: 'Tipo', condition: 'Estado',
+                bedrooms: 'Dorm.', bathrooms: 'Baños', area: 'm²', pricepersqm: 'Precio/m²',
+                city: 'Ciudad', publicationdate: 'Publicado', firstseenat: 'Detectado' }[filterColId] ?? filterColId;
+              return (
+                <Box sx={{ p: 2, minWidth: 220 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: COLORS.mutedText, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Filtrar: {colLabel}
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 1.5 }}>
+                    {cfg.type === 'text' && (
+                      <TextField size="small" fullWidth autoFocus
+                        type="text"
+                        label={cfg.labels?.[0]}
+                        value={colFilters[cfg.keys[0]] ?? ''}
+                        onChange={e => handleColFilterChange(cfg.keys[0], e.target.value)}
+                        slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon sx={{ fontSize: 16 }} /></InputAdornment> } }}
+                      />
+                    )}
+                    {cfg.type === 'exact' && (
+                      <TextField size="small" fullWidth autoFocus
+                        type="number"
+                        label={cfg.labels?.[0]}
+                        value={colFilters[cfg.keys[0]] ?? ''}
+                        onChange={e => handleColFilterChange(cfg.keys[0], e.target.value)}
+                        slotProps={{ input: { inputProps: { min: 0, step: 1 } } }}
+                      />
+                    )}
+                    {cfg.type === 'range' && cfg.keys.map((key, i) => (
+                      <TextField key={key} size="small" fullWidth autoFocus={i === 0}
+                        type={cfg.inputType ?? 'number'}
+                        label={cfg.labels?.[i] ?? key}
+                        value={colFilters[key] ?? ''}
+                        onChange={e => handleColFilterChange(key, e.target.value)}
+                        slotProps={cfg.inputType !== 'date' ? { input: { inputProps: { min: 0 } } } : undefined}
+                      />
+                    ))}
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1.5 }}>
+                    <Button size="small" onClick={() => clearColFilter(filterColId!)}
+                      sx={{ textTransform: 'none', color: COLORS.mutedText }}>
+                      Limpiar
+                    </Button>
+                  </Box>
+                </Box>
+              );
+            })()}
+          </Popover>
 
           {/* ─── COMPARISON CHARTS (2+ selected) ─── */}
           {selectedPropertyIds.size >= 2 && (
