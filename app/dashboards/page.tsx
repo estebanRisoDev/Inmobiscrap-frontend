@@ -632,6 +632,7 @@ export default function Dashboard() {
   const [timelineOpen,    setTimelineOpen]    = useState(false);
   const [timelineData,    setTimelineData]    = useState<PropertyTimeline | null>(null);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [myAlerts,        setMyAlerts]        = useState<Set<number>>(new Set());
 
   const [locations, setLocations] = useState<Locations>({
     regions: [], cities: [], neighborhoods: [], propertyTypes: [],
@@ -658,6 +659,29 @@ export default function Dashboard() {
       setSessionStart(user.credits);
     }
   }, [user]);
+
+  // ── Price alerts ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!isPro && !isAdmin) return;
+    axios.get(`${API_BASE_URL}/api/price-alerts`, { headers: authHeaders() })
+      .then(({ data }) => setMyAlerts(new Set<number>(data)))
+      .catch(() => {});
+  }, [isPro, isAdmin]);
+
+  const togglePriceAlert = useCallback(async (propertyId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isPro && !isAdmin) return;
+    const has = myAlerts.has(propertyId);
+    try {
+      if (has) {
+        await axios.delete(`${API_BASE_URL}/api/price-alerts/${propertyId}`, { headers: authHeaders() });
+        setMyAlerts(prev => { const s = new Set(prev); s.delete(propertyId); return s; });
+      } else {
+        await axios.post(`${API_BASE_URL}/api/price-alerts/${propertyId}`, {}, { headers: authHeaders() });
+        setMyAlerts(prev => new Set(prev).add(propertyId));
+      }
+    } catch { /* silent */ }
+  }, [myAlerts, isPro, isAdmin]);
 
   // Cascada de filtros
   useEffect(() => {
@@ -2381,6 +2405,7 @@ export default function Dashboard() {
                             </Box>
                           </TableCell>
                         ))}
+                        <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Alerta</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Historial</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', width: 50 }}>Link</TableCell>
                       </TableRow>
@@ -2449,6 +2474,22 @@ export default function Dashboard() {
                           </TableCell>
                           <TableCell><Typography variant="caption">{formatDate(p.firstSeenAt)}</Typography></TableCell>
                           <TableCell>
+                            <Tooltip title={
+                              (!isPro && !isAdmin) ? 'Disponible en Plan Pro'
+                              : myAlerts.has(p.id) ? 'Desactivar alerta de precio'
+                              : 'Activar alerta de bajada de precio'
+                            }>
+                              <span>
+                                <IconButton size="small"
+                                  disabled={!isPro && !isAdmin}
+                                  onClick={e => togglePriceAlert(p.id, e)}
+                                  sx={{ color: myAlerts.has(p.id) ? '#f59e0b' : COLORS.mutedText }}>
+                                  <NotificationsActiveIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </TableCell>
+                          <TableCell>
                             <Tooltip title={p.timesScraped > 1 ? 'Ver historial de precios' : 'Solo 1 snapshot disponible'}>
                               <span>
                                 <IconButton size="small"
@@ -2470,7 +2511,7 @@ export default function Dashboard() {
                       ))}
                       {(!propertyList?.items || propertyList.items.length === 0) && (
                         <TableRow>
-                          <TableCell colSpan={15} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
+                          <TableCell colSpan={16} sx={{ textAlign: 'center', py: 4, color: COLORS.mutedText }}>
                             No se encontraron propiedades con los filtros aplicados
                           </TableCell>
                         </TableRow>

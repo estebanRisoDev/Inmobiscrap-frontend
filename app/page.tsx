@@ -113,7 +113,7 @@ const PLANS = [
     name: 'Pro',
     priceCLP: 100000,
     badge: 'Ilimitado',
-    highlights: ['Créditos ilimitados', 'Acceso completo a métricas', 'Prioridad y features pro'],
+    highlights: ['Consultas ilimitadas sin créditos', 'Acceso a data de ventas del mercado', 'Alertas por email cuando baja el precio de propiedades'],
     cta: 'Actualizar a Pro',
     featured: true,
   },

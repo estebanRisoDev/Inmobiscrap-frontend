@@ -27,7 +27,8 @@ const PLANS = [
   { id: 'pack50'   as PlanId, name: 'Pack Starter',   price: '$2.000',   period: 'CLP',     credits: 50,    desc: 'Ideal para consultas ocasionales', featured: false, icon: '🚀' },
   { id: 'pack100'  as PlanId, name: 'Pack Regular',    price: '$3.000',   period: 'CLP',     credits: 100,   desc: 'La opción más popular entre usuarios', featured: false, icon: '⚡' },
   { id: 'pack1000' as PlanId, name: 'Pack Intensivo',  price: '$15.000',  period: 'CLP',     credits: 1000,  desc: 'Para análisis de mercado intensivo', featured: false, icon: '🔥' },
-  { id: 'pro'      as PlanId, name: 'Plan Pro',        price: '$100.000', period: 'CLP/mes', credits: 0,     desc: 'Acceso ilimitado a todas las métricas y dashboards', featured: true, icon: '∞' },
+  { id: 'pro'      as PlanId, name: 'Plan Pro',        price: '$100.000', period: 'CLP/mes', credits: 0,     desc: 'Acceso ilimitado a todas las métricas y dashboards', featured: true, icon: '∞',
+    features: ['Consultas ilimitadas sin créditos', 'Acceso a data de ventas del mercado', 'Alertas por email cuando baja el precio de propiedades'] },
 ];
 
 // ── PlanCard ──────────────────────────────────────────────────────────────────
@@ -127,10 +128,21 @@ function PlanCard({ plan, isCurrentPro, isPreselected, isLoading, onCheckout }: 
         </span>
       </div>
 
-      {/* Desc */}
-      <div style={{ fontSize: '13px', color: C.muted, lineHeight: 1.55, flexGrow: 1, marginBottom: '20px' }}>
-        {plan.desc}
-      </div>
+      {/* Desc / Features */}
+      {'features' in plan && plan.features ? (
+        <div style={{ flexGrow: 1, marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {(plan.features as string[]).map((f) => (
+            <div key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+              <span style={{ color: C.accent, fontWeight: 700, fontSize: '13px', lineHeight: 1.55, flexShrink: 0 }}>✓</span>
+              <span style={{ fontSize: '13px', color: C.muted, lineHeight: 1.55 }}>{f}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: '13px', color: C.muted, lineHeight: 1.55, flexGrow: 1, marginBottom: '20px' }}>
+          {plan.desc}
+        </div>
+      )}
 
       {/* Button */}
       <button
