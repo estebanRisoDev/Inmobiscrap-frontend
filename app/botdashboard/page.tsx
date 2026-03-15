@@ -176,12 +176,12 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie data={botStatusData} cx="50%" cy="50%" labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`}
                   outerRadius={90} innerRadius={45} dataKey="value" paddingAngle={3}>
                   <Cell fill={CHART_COLORS.active}   />
                   <Cell fill={CHART_COLORS.inactive} />
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(v, n) => [(v ?? 0).toLocaleString('es-CL'), n]} />
               </PieChart>
             </ResponsiveContainer>
           </Paper>
@@ -203,7 +203,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
                     <Cell key={i} fill={STATUS_COLORS[entry.name] ?? '#9e9e9e'} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(v, n) => [(v ?? 0).toLocaleString('es-CL'), n]} />
               </PieChart>
             </ResponsiveContainer>
           </Paper>
@@ -238,7 +238,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <Tooltip formatter={(v, n) => [(v ?? 0).toLocaleString('es-CL'), n]} />
                 <Legend />
                 <Area type="monotone" dataKey="exitosas" stroke={CHART_COLORS.success} fill="url(#gradSuccess)" strokeWidth={2} name="Exitosas" />
                 <Area type="monotone" dataKey="fallidas" stroke={CHART_COLORS.error}   fill="url(#gradError)"   strokeWidth={2} name="Fallidas"  />
@@ -265,7 +265,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
-                <Tooltip formatter={(v: number) => [v.toLocaleString('es-CL'), 'Propiedades']} />
+                <Tooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                 <Bar dataKey="total" fill={CHART_COLORS.primary} name="Total scrapeadas" radius={[0, 4, 4, 0]}>
                   {topBotsByScraped.map((_, i) => (
                     <Cell key={i} fill={i === 0 ? '#1565c0' : i === 1 ? '#1976d2' : '#42a5f5'} />

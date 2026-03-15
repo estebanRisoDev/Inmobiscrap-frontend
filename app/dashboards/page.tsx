@@ -1704,7 +1704,7 @@ export default function Dashboard() {
               />
               <Legend
                 wrapperStyle={{ fontSize: 12, paddingTop: 12 }}
-                formatter={(value: string) => <span style={{ color: COLORS.mutedText }}>{value}</span>}
+                formatter={(value) => <span style={{ color: COLORS.mutedText }}>{value}</span>}
               />
               <Area
                 type="monotone"
@@ -1777,7 +1777,7 @@ export default function Dashboard() {
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
                           {isUp ? <TrendingUpIcon sx={{ fontSize: 16, color }} /> : <TrendingDownIcon sx={{ fontSize: 16, color }} />}
                           <Typography variant="body2" sx={{ fontWeight: 800, color, fontSize: '0.85rem' }}>
-                            {isUp ? '+' : ''}{item.priceDiffPct?.toFixed(1)}%
+                            {isUp ? '+' : ''}{item.priceDiffPct != null ? item.priceDiffPct.toFixed(1) : '0'}%
                           </Typography>
                         </Box>
                         <Typography variant="caption" sx={{ color: COLORS.mutedText, fontSize: '0.7rem' }}>
@@ -1811,7 +1811,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="rango" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <RechartTooltip formatter={(v: number) => [`${v} propiedades`]} />
+                <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                 <Bar dataKey="cantidad" fill={COLORS.primary} radius={[4, 4, 0, 0]} name="Propiedades" />
               </BarChart>
             </ResponsiveContainer>
@@ -1832,10 +1832,10 @@ export default function Dashboard() {
                 <PieChart>
                   <Pie data={propertyTypeStats} dataKey="count" nameKey="type" cx="50%" cy="50%"
                     outerRadius={100} innerRadius={50} paddingAngle={2}
-                    label={({ percent }) => `${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                    label={({ percent }) => `${((percent ?? 0) * 100).toFixed(0)}%`} labelLine={false}>
                     {propertyTypeStats.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
-                  <RechartTooltip formatter={(v: number, n: string) => [`${v} propiedades`, n]} />
+                  <RechartTooltip formatter={(v, n) => [`${(Number(v) || 0).toLocaleString('es-CL')} propiedades`, n]} />
                 </PieChart>
               </ResponsiveContainer>
               <Box sx={{ flex: 1 }}>
@@ -1981,7 +1981,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="type" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <RechartTooltip />
+                <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL', { maximumFractionDigits: 1 }), n]} />
                 <Legend />
                 <Bar dataKey="avgBedrooms"  fill={COLORS.primary}   name="Prom. Dormitorios" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="avgBathrooms" fill={COLORS.secondary} name="Prom. Baños"        radius={[4, 4, 0, 0]} />
@@ -1999,7 +1999,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                <RechartTooltip />
+                <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                 <Bar dataKey="count" fill={COLORS.accent} name="Propiedades" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -2017,7 +2017,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
-              <RechartTooltip />
+              <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
               <Bar dataKey="value" fill={COLORS.primary} name="Propiedades" radius={[4, 4, 0, 0]}>
                 {propertySourceData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
               </Bar>
@@ -2063,7 +2063,7 @@ export default function Dashboard() {
                             <Cell key={i} fill={i === 0 ? COLORS.success : COLORS.warning} />
                           ))}
                         </Pie>
-                        <RechartTooltip />
+                        <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                       </PieChart>
                     </ResponsiveContainer>
                   ) : <EmptyState message="Sin datos de estado disponibles" />}
@@ -2077,8 +2077,8 @@ export default function Dashboard() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                         <XAxis dataKey="condition" tick={{ fontSize: 12 }} />
                         <YAxis tick={{ fontSize: 11 }}
-                          tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
-                        <RechartTooltip formatter={(value: any) => formatCLP(value)} />
+                          tickFormatter={v => v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`} />
+                        <RechartTooltip formatter={(v, n) => [formatCLP(Number(v)), n]} />
                         <Legend />
                         <Bar dataKey="avgPrice" name="Promedio" fill={COLORS.primary} radius={[4, 4, 0, 0]} />
                         <Bar dataKey="minPrice" name="Mínimo" fill={COLORS.accent} radius={[4, 4, 0, 0]} />
@@ -2099,7 +2099,7 @@ export default function Dashboard() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                         <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} />
-                        <RechartTooltip />
+                        <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                         <Area type="monotone" dataKey="count" name="Publicaciones"
                           stroke={COLORS.primary} fill={COLORS.primary} fillOpacity={0.2} />
                       </AreaChart>
@@ -2115,8 +2115,8 @@ export default function Dashboard() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                         <XAxis dataKey="range" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }}
-                          tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
-                        <RechartTooltip formatter={(value: any) => formatCLP(value)} />
+                          tickFormatter={v => v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`} />
+                        <RechartTooltip formatter={(v, n) => [formatCLP(Number(v)), n]} />
                         <Bar dataKey="avgPrice" name="Precio promedio" radius={[4, 4, 0, 0]}>
                           {(generalMetrics.priceByAge ?? []).map((_, i) => (
                             <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
@@ -2148,7 +2148,7 @@ export default function Dashboard() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="type" tick={{ fontSize: 11 }} />
                           <YAxis tick={{ fontSize: 11 }} />
-                          <RechartTooltip />
+                          <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                           <Legend />
                           <Bar dataKey="Nuevo" name="Nuevo" fill={COLORS.success} radius={[4, 4, 0, 0]} />
                           <Bar dataKey="Usado" name="Usado" fill={COLORS.warning} radius={[4, 4, 0, 0]} />
@@ -2210,11 +2210,11 @@ export default function Dashboard() {
                         <BarChart data={data}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="type" tick={{ fontSize: 11 }} />
-                          <YAxis yAxisId="clp" tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v.toLocaleString()} />
+                          <YAxis yAxisId="clp" tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000000 ? `$${(v/1000000).toFixed(1)}M` : `$${v.toLocaleString()}`} />
                           {ufCurrencies.length > 0 && (
                             <YAxis yAxisId="uf" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v.toFixed(0)} UF`} />
                           )}
-                          <RechartTooltip formatter={(value: number, name: string) => [value.toLocaleString('es-CL'), name]} />
+                          <RechartTooltip formatter={(v, n) => { const val = Number(v) || 0; return [String(n).includes('UF') ? `${val.toLocaleString('es-CL')} UF` : `$${val.toLocaleString('es-CL')}`, n]; }} />
                           <Legend />
                           {clpCurrencies.map((c, i) => (
                             <Bar key={c} yAxisId="clp" dataKey={c} name={`${c}/m²`} fill={barColors[c] ?? fallbackColors[i % fallbackColors.length]} radius={[4, 4, 0, 0]} />
@@ -2250,12 +2250,12 @@ export default function Dashboard() {
                       <ResponsiveContainer width="100%" height={Math.max(300, cities.length * 30)}>
                         <BarChart data={data} layout="vertical">
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
-                          <XAxis xAxisId="clp" type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v.toLocaleString()} />
+                          <XAxis xAxisId="clp" type="number" tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000000 ? `$${(v/1000000).toFixed(1)}M` : `$${v.toLocaleString()}`} />
                           {ufCurrencies.length > 0 && (
                             <XAxis xAxisId="uf" type="number" orientation="top" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v.toFixed(0)} UF`} />
                           )}
                           <YAxis dataKey="city" type="category" width={120} tick={{ fontSize: 10 }} />
-                          <RechartTooltip formatter={(value: number, name: string) => [value.toLocaleString('es-CL'), name]} />
+                          <RechartTooltip formatter={(v, n) => { const val = Number(v) || 0; return [String(n).includes('UF') ? `${val.toLocaleString('es-CL')} UF` : `$${val.toLocaleString('es-CL')}`, n]; }} />
                           <Legend />
                           {clpCurrencies.map(c => (
                             <Bar key={c} xAxisId="clp" dataKey={c} name={`${c}/m²`} fill="#2563eb" radius={[0, 4, 4, 0]} />
@@ -2287,7 +2287,7 @@ export default function Dashboard() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="currency" tick={{ fontSize: 11 }} />
                           <YAxis tick={{ fontSize: 11 }} />
-                          <RechartTooltip />
+                          <RechartTooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
                           <Legend />
                           <Bar dataKey="Nuevo" name="Nuevo" fill={COLORS.success} radius={[4, 4, 0, 0]} />
                           <Bar dataKey="Usado" name="Usado" fill={COLORS.warning} radius={[4, 4, 0, 0]} />
@@ -2652,8 +2652,8 @@ export default function Dashboard() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
                           <YAxis tick={{ fontSize: 11 }}
-                            tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
-                          <RechartTooltip formatter={(value: any, _: any, props: any) => [formatPrice(value, props.payload?.currency), 'Precio']} />
+                            tickFormatter={v => v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`} />
+                          <RechartTooltip formatter={(v, _n, props: any) => [formatPrice(Number(v), props?.payload?.currency), 'Precio']} />
                           <Bar dataKey="price" name="Precio" radius={[4, 4, 0, 0]}>
                             {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                           </Bar>
@@ -2707,7 +2707,7 @@ export default function Dashboard() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
                           <YAxis tick={{ fontSize: 11 }} />
-                          <RechartTooltip formatter={(value: any) => [`${value} m²`, 'Superficie']} />
+                          <RechartTooltip formatter={(v) => [`${Number(v) || 0} m²`, 'Superficie']} />
                           <Bar dataKey="area" name="m²" radius={[4, 4, 0, 0]}>
                             {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                           </Bar>
@@ -2722,8 +2722,8 @@ export default function Dashboard() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
                           <YAxis tick={{ fontSize: 11 }}
-                            tickFormatter={v => v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : `${v}`} />
-                          <RechartTooltip formatter={(value: any, _: any, props: any) => [`${Number(value).toLocaleString()} ${props.payload?.currency}/m²`, 'Precio/m²']} />
+                            tickFormatter={v => v >= 1e6 ? `$${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(0)}K` : `$${v}`} />
+                          <RechartTooltip formatter={(v, _n, props: any) => [`${(Number(v) || 0).toLocaleString('es-CL')} ${props?.payload?.currency}/m²`, 'Precio/m²']} />
                           <Bar dataKey="pricePerSqm" name="Precio/m²" radius={[4, 4, 0, 0]}>
                             {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                           </Bar>
@@ -2738,7 +2738,7 @@ export default function Dashboard() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#e9ecef" />
                           <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-15} textAnchor="end" height={60} />
                           <YAxis tick={{ fontSize: 11 }} />
-                          <RechartTooltip formatter={(value: any) => [`${value} días`, 'Tiempo']} />
+                          <RechartTooltip formatter={(v) => [`${Number(v) || 0} días`, 'Tiempo']} />
                           <Bar dataKey="daysOnMarket" name="Días" radius={[4, 4, 0, 0]}>
                             {comparisonBarData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                           </Bar>
