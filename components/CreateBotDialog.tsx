@@ -14,7 +14,7 @@ import axios from 'axios';
 import { authHeaders } from '@/lib/auth';
 import { useAuth } from '@/context/AuthContext'; // ← AÑADIDO
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = '/api';
 
 const BOT_SOURCES = [
   { value: 'portalinmobiliario', label: 'Portal Inmobiliario' },

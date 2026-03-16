@@ -19,7 +19,7 @@ const C = {
   warning:   '#f59e0b',
 };
 
-const API_BASE = 'http://localhost:5000';
+const API_BASE = '/api';
 
 type PlanId = 'pack50' | 'pack100' | 'pack1000' | 'pro';
 

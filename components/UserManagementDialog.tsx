@@ -21,7 +21,7 @@ import SmartToyIcon from '@mui/icons-material/SmartToy';
 import axios from 'axios';
 import { authHeaders } from '@/lib/auth';
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = '/api';
 
 interface UserItem {
   id: number;

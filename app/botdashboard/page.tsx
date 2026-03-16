@@ -33,7 +33,7 @@ import { UserManagementDialog }   from '@/components/UserManagementDialog';
 import { useAuth }                from '@/context/AuthContext';
 import { authHeaders }            from '@/lib/auth';
 
-const API_BASE_URL = 'http://localhost:5000';
+const API_BASE_URL = '/api';
 
 interface Bot {
   id: number;

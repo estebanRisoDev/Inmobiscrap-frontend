@@ -60,7 +60,7 @@ export function BotLogDialog({
           key={viewerKeyRef.current}
           autoConnect={autoConnect} 
           botId={botId}
-          hubUrl="http://localhost:5000/hubs/botlogs"
+          hubUrl="/api/hubs/botlogs"
         />
       </DialogContent>
     </Dialog>

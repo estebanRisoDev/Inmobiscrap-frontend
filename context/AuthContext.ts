@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useRef, Re
 import axios from 'axios';
 import { AuthUser, getToken, setToken, setUser, getUser, removeToken, isLoggedIn } from '@/lib/auth';
 
-const API_BASE = 'http://localhost:5000';
+const API_BASE = '/api';
 
 interface AuthContextValue {
   user: AuthUser | null;

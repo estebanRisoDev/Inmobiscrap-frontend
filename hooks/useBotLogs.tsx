@@ -47,7 +47,7 @@ interface UseBotLogsReturn {
 
 export function useBotLogs(options: UseBotLogsOptions = {}): UseBotLogsReturn {
   const {
-    hubUrl = 'http://localhost:5000/hubs/botlogs',
+    hubUrl = '/api/hubs/botlogs',
     autoConnect = false,
     maxLogs = 200,
     botId, 

@@ -20,7 +20,7 @@ interface BotLogViewerProps {
 
 export function BotLogViewer({
   autoConnect = false,
-  hubUrl = 'http://localhost:5000/hubs/botlogs',
+  hubUrl = '/api/hubs/botlogs',
   botId, // NUEVO
 }: BotLogViewerProps) {
   const {

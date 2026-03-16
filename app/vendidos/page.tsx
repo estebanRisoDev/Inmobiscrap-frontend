@@ -33,7 +33,7 @@ import { useRouter }     from 'next/navigation';
 import { useAuth }       from '@/context/AuthContext';
 import { authHeaders }   from '@/lib/auth';
 
-const API = 'http://localhost:5000';
+const API = '/api';
 
 const COLORS = {
   primary:   '#0f4c81',
