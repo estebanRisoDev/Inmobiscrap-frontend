@@ -130,8 +130,8 @@ const fmtDate = (d: string | null) => {
 };
 
 const StatCard = ({ icon, label, value, sub, color }: { icon: React.ReactNode; label: string; value: string | number; sub?: string; color: string }) => (
-  <Card sx={{ flex: 1, minWidth: 180, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-    <CardContent sx={{ p: 2.5 }}>
+  <Card sx={{ flex: 1, minWidth: { xs: 130, sm: 180 }, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+    <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
         <Box sx={{ p: 1, borderRadius: 2, bgcolor: `${color}15`, color, display: 'flex' }}>{icon}</Box>
         <Typography variant="body2" sx={{ color: COLORS.mutedText, fontWeight: 500 }}>{label}</Typography>
@@ -143,7 +143,7 @@ const StatCard = ({ icon, label, value, sub, color }: { icon: React.ReactNode; l
 );
 
 const ChartPaper = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <Paper sx={{ p: 3, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', flex: 1, minWidth: 350 }}>
+  <Paper sx={{ p: { xs: 1.5, sm: 3 }, borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', flex: 1, minWidth: { xs: 0, sm: 350 } }}>
     <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>{title}</Typography>
     {children}
   </Paper>
@@ -293,16 +293,16 @@ export default function VendidosPage() {
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
 
       {/* ─── Header ─── */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBackIcon />}
             onClick={() => router.push('/dashboards')}
             sx={{ textTransform: 'none', borderRadius: 2, borderColor: '#ddd', color: COLORS.mutedText,
-              '&:hover': { borderColor: COLORS.primary, color: COLORS.primary } }}>
+              '&:hover': { borderColor: COLORS.primary, color: COLORS.primary }, display: { xs: 'none', sm: 'inline-flex' } }}>
             Dashboard
           </Button>
           <Box>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px' }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px', fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
               Propiedades Vendidas
             </Typography>
             <Typography variant="body2" sx={{ color: COLORS.mutedText, mt: 0.5 }}>
@@ -311,7 +311,7 @@ export default function VendidosPage() {
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: { xs: '100%', sm: 'auto' }, justifyContent: { xs: 'space-between', sm: 'flex-end' } }}>
           {user && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Avatar src={user.avatarUrl} sx={{ width: 36, height: 36, bgcolor: COLORS.primary, fontSize: '0.85rem' }}>
@@ -336,7 +336,7 @@ export default function VendidosPage() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       {/* ─── Tabs ─── */}
-      <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
+      <Box sx={{ display: 'flex', gap: 1, mb: 3, overflowX: 'auto', pb: 0.5 }}>
         {[
           { key: 'overview', label: 'Resumen', icon: <TrendingUpIcon fontSize="small" /> },
           { key: 'list', label: `Vendidas (${total})`, icon: <SellIcon fontSize="small" /> },
@@ -347,7 +347,8 @@ export default function VendidosPage() {
             startIcon={t.icon}
             onClick={() => setTab(t.key as any)}
             sx={{
-              textTransform: 'none', borderRadius: 2, px: 3,
+              textTransform: 'none', borderRadius: 2, px: { xs: 2, sm: 3 }, whiteSpace: 'nowrap', flexShrink: 0,
+              fontSize: { xs: '0.8rem', sm: '0.875rem' },
               ...(tab === t.key ? {
                 background: `linear-gradient(45deg, ${COLORS.primary} 30%, #1a6bb5 90%)`,
                 boxShadow: '0 3px 5px 2px rgba(15,76,129,.2)',
@@ -362,7 +363,7 @@ export default function VendidosPage() {
       {tab === 'overview' && stats && (
         <>
           {/* KPIs */}
-          <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)', md: 'repeat(6, 1fr)' }, gap: 2, mb: 3 }}>
             <StatCard icon={<SellIcon />} label="Total Vendidas" value={stats.totalSold} color={COLORS.error} />
             <StatCard icon={<StorefrontIcon />} label="Vendidas este mes" value={stats.soldThisMonth}
               sub={`${stats.soldThisWeek} esta semana`} color={COLORS.warning} />
@@ -379,7 +380,7 @@ export default function VendidosPage() {
           </Box>
 
           {/* Charts */}
-          <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 3 }}>
             {/* Vendidas por mes */}
             <ChartPaper title="Vendidas por mes">
               {stats.soldByMonth.length > 0 ? (
@@ -430,7 +431,7 @@ export default function VendidosPage() {
               <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
                 Precio promedio: Vendidas vs Activas
               </Typography>
-              <Box sx={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', gap: { xs: 2, sm: 4 }, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
                 <Box sx={{ textAlign: 'center' }}>
                   <Typography variant="h5" sx={{ fontWeight: 700, color: COLORS.error }}>
                     ${stats.avgPriceSold.toLocaleString('es-CL')}
@@ -565,7 +566,7 @@ export default function VendidosPage() {
       {/* ═══ TAB: VERIFICATION QUEUE ═══ */}
       {tab === 'queue' && (
         <Paper sx={{ borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
-          <Box sx={{ p: 2, borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ p: 2, borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, gap: 1 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
               Cola de verificación ({queue.length} propiedades)
             </Typography>

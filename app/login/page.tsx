@@ -68,17 +68,23 @@ function LoginForm() {
 
   return (
     <div style={styles.page}>
+      <style>{`
+        @media (max-width: 480px) {
+          .auth-card { padding: 24px !important; margin: 12px !important; }
+          .auth-heading { font-size: 19px !important; }
+        }
+      `}</style>
       {/* Fondo animado */}
       <div style={styles.bgGrid} />
 
-      <div style={styles.card}>
+      <div className="auth-card" style={styles.card}>
         {/* Logo / Header */}
         <div style={styles.logoRow}>
-          <span style={styles.logoIcon}>🏠</span>
-          <span style={styles.logoText}>InmobiScrap</span>
+          <img src="/binoculars.png" alt="Prisma" width={26} height={26} style={{ objectFit: 'contain' }} />
+          <span style={styles.logoText}>Prisma Inmobiliario</span>
         </div>
 
-        <h1 style={styles.heading}>Bienvenido de vuelta</h1>
+        <h1 className="auth-heading" style={styles.heading}>Bienvenido de vuelta</h1>
         <p style={styles.subheading}>Inicia sesión para continuar</p>
 
         {error && (
@@ -180,6 +186,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: '100%',
     maxWidth: '420px',
     boxShadow: `0 0 60px ${C.primary}22`,
+    margin: '16px',
   },
   logoRow: {
     display: 'flex',

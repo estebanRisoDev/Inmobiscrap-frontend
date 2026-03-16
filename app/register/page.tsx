@@ -73,15 +73,21 @@ function RegisterForm() {
 
   return (
     <div style={styles.page}>
+      <style>{`
+        @media (max-width: 480px) {
+          .auth-card { padding: 24px !important; margin: 12px !important; }
+          .auth-heading { font-size: 19px !important; }
+        }
+      `}</style>
       <div style={styles.bgGrid} />
-      <div style={styles.card}>
+      <div className="auth-card" style={styles.card}>
         <div style={styles.logoRow}>
-          <span style={styles.logoIcon}>🏠</span>
-          <span style={styles.logoText}>InmobiScrap</span>
+          <img src="/binoculars.png" alt="Prisma" width={26} height={26} style={{ objectFit: 'contain' }} />
+          <span style={styles.logoText}>Prisma Inmobiliario</span>
         </div>
 
-        <h1 style={styles.heading}>Crear cuenta</h1>
-        <p style={styles.subheading}>Únete al sistema de scraping inteligente</p>
+        <h1 className="auth-heading" style={styles.heading}>Crear cuenta</h1>
+        <p style={styles.subheading}>Únete a la plataforma de análisis inmobiliario</p>
 
         {error && (
           <div style={styles.errorBanner}><span>⚠</span> {error}</div>
