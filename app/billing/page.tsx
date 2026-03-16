@@ -187,8 +187,8 @@ function StateScreen({ emoji, title, titleColor, desc, btnLabel, btnColor, onBtn
     }}>
       <div style={{
         background: C.surface, border: `1px solid ${C.border}`,
-        borderRadius: '20px', padding: '56px 48px', maxWidth: '440px', width: '100%',
-        textAlign: 'center', margin: '24px',
+        borderRadius: '20px', padding: '40px 24px', maxWidth: '440px', width: '100%',
+        textAlign: 'center', margin: '16px',
         boxShadow: '0 32px 80px rgba(0,0,0,0.4)',
       }}>
         <div style={{ fontSize: '64px', marginBottom: '20px', lineHeight: 1 }}>{emoji}</div>
@@ -407,10 +407,18 @@ function BillingContent() {
       <style>{`
         body { margin: 0; background: #080c10; }
         @keyframes glow-pulse { 0%,100% { opacity:.6; } 50% { opacity:1; } }
+        @media (max-width: 640px) {
+          .billing-content { padding: 24px 12px 48px !important; }
+          .billing-hero { margin-bottom: 32px !important; }
+          .billing-hero h1 { font-size: 24px !important; }
+          .billing-footer { padding: 16px !important; flex-direction: column !important; text-align: center; }
+          .billing-nav { padding: 12px 16px !important; }
+          .billing-plan-grid { gap: 12px !important; }
+        }
       `}</style>
 
       {/* ── Top nav ── */}
-      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.border}22`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="billing-nav" style={{ padding: '16px 24px', borderBottom: `1px solid ${C.border}22`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <button
           onClick={() => router.back()}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: C.muted, fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: '6px 0' }}
@@ -432,10 +440,10 @@ function BillingContent() {
         )}
       </div>
 
-      <div style={{ maxWidth: '1020px', margin: '0 auto', padding: '48px 24px 80px' }}>
+      <div className="billing-content" style={{ maxWidth: '1020px', margin: '0 auto', padding: '48px 24px 80px' }}>
 
         {/* ── Hero ── */}
-        <div style={{ textAlign: 'center', marginBottom: '56px' }}>
+        <div className="billing-hero" style={{ textAlign: 'center', marginBottom: '56px' }}>
           <div style={{ display: 'inline-block', background: `${C.primary}12`, border: `1px solid ${C.primary}25`, borderRadius: '999px', padding: '5px 14px', fontSize: '12px', fontWeight: 700, color: C.primary, letterSpacing: '0.5px', marginBottom: '16px' }}>
             PLANES & CRÉDITOS
           </div>
@@ -550,7 +558,7 @@ function BillingContent() {
         )}
 
         {/* ── Plan grid ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '48px' }}>
+        <div className="billing-plan-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '48px' }}>
           {PLANS.map(plan => (
             <PlanCard
               key={plan.id}
@@ -564,7 +572,7 @@ function BillingContent() {
         </div>
 
         {/* ── Footer ── */}
-        <div style={{
+        <div className="billing-footer" style={{
           background: C.surface, border: `1px solid ${C.border}`,
           borderRadius: '14px', padding: '20px 28px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',

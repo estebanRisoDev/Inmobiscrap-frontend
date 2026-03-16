@@ -1,5 +1,5 @@
 'use client';
-// app/page.tsx — Landing page de InmobiScrap (focus métricas + planes)
+// app/page.tsx — Landing page de Prisma Inmobiliario (focus métricas + planes)
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -32,44 +32,40 @@ const FEATURES = [
   },
   {
     icon: '🧠',
-    title: 'Datos Estructurados con LLM',
-    desc: 'Claude 4.6 Sonnet via AWS Bedrock normaliza y enriquece datos para que puedas analizar sin ruido.',
+    title: 'Análisis con IA',
+    desc: 'Inteligencia artificial normaliza y enriquece los datos para que puedas analizar sin ruido ni inconsistencias.',
   },
   {
     icon: '⚡',
-    title: 'Actualización Recurrente',
-    desc: 'Los dashboards se alimentan con ejecuciones programadas y controladas. Tú solo consumes insights.',
+    title: 'Actualización Continua',
+    desc: 'Los dashboards se alimentan con datos actualizados de forma programada. Tú solo consumes insights.',
   },
   {
     icon: '🔎',
-    title: 'Trazabilidad',
-    desc: 'Logs y auditoría por ejecución para entender cobertura, calidad de extracción y variaciones.',
+    title: 'Seguimiento de Propiedades',
+    desc: 'Historial de precios, detección de cambios y alertas para entender la evolución del mercado.',
   },
   {
     icon: '🔐',
     title: 'Acceso Seguro',
-    desc: 'Auth JWT + OAuth. Roles Admin/Pro. El acceso a métricas y créditos se valida del lado servidor.',
+    desc: 'Autenticación segura con Google OAuth. Roles y permisos diferenciados para cada tipo de usuario.',
   },
   {
     icon: '🗓️',
-    title: 'Programación',
-    desc: 'Ejecuciones automáticas (cron) y recolección continua para que tus métricas no queden desactualizadas.',
+    title: 'Informes y Reportes',
+    desc: 'Genera informes PDF comparativos, filtra por región, comuna y tipo para análisis enfocados.',
   },
-];
-
-const SOURCES = [
-  'Portal Inmobiliario', 'Yapo', 'TocToc', 'Mercado Libre', 'GoPlaceIt', 'iCasas',
 ];
 
 const STACK = [
   { label: '.NET 9',       color: '#512BD4' },
-  { label: 'Next.js 15',   color: '#ffffff' },
+  { label: 'Next.js 16',   color: '#ffffff' },
   { label: 'PostgreSQL',   color: '#336791' },
   { label: 'AWS Bedrock',  color: '#FF9900' },
-  { label: 'Playwright',   color: '#45ba4b' },
-  { label: 'Hangfire',     color: '#e85d3c' },
   { label: 'SignalR',      color: '#00d4ff' },
   { label: 'Claude 4.6',   color: '#cc9b7a' },
+  { label: 'React 19',     color: '#61DAFB' },
+  { label: 'MUI',          color: '#007FFF' },
 ];
 
 const INITIAL_CREDITS = 50;
@@ -126,13 +122,13 @@ function formatCLP(n: number) {
 
 // ── Animación de terminal ─────────────────────────────────────────────────────
 const TERMINAL_LINES = [
-  { delay: 0,    text: '$ inmobiscrap metrics --latest',            color: C.accent },
+  { delay: 0,    text: '$ prisma analytics --region RM --last 30d',    color: C.accent },
   { delay: 600,  text: '📊 Cargando dashboard: RM · Últimos 30 días', color: C.text   },
   { delay: 1200, text: '📈 Tendencia precio promedio: +3.2% MoM',     color: C.primary},
   { delay: 1800, text: '🏙️ Comuna top: Ñuñoa · 214 publicaciones',     color: C.text   },
   { delay: 2400, text: '🏷️ Tipo dominante: Departamento (62%)',       color: C.accent },
-  { delay: 3000, text: '✅ Métricas listas. Fuente: 6 portales',       color: C.accent },
-  { delay: 3600, text: '🔎 Calidad extracción: 98.1% campos completos', color: C.primary},
+  { delay: 3000, text: '✅ Análisis completo. 12,450 propiedades',     color: C.accent },
+  { delay: 3600, text: '🔎 Cobertura de datos: 98.1% campos completos', color: C.primary},
 ];
 
 function getCreditColor(credits: number): string {
@@ -167,7 +163,7 @@ function Terminal() {
         <span style={{ ...s.dot, background: '#ff5f57' }} />
         <span style={{ ...s.dot, background: '#ffbd2e' }} />
         <span style={{ ...s.dot, background: '#28c840' }} />
-        <span style={s.terminalTitle}>inmobiscrap — zsh</span>
+        <span style={s.terminalTitle}>prisma — analytics</span>
       </div>
       <div style={s.terminalBody}>
         {TERMINAL_LINES.map((line, i) => (
@@ -235,7 +231,7 @@ function MetricsChart() {
       <div style={s.chartHeader}>
         <div>
           <div style={s.chartTitle}>Vista previa de métricas</div>
-          <div style={s.chartSub}>Tendencia de publicaciones procesadas (demo)</div>
+          <div style={s.chartSub}>Tendencia de propiedades analizadas (demo)</div>
         </div>
         <div style={s.chartPill}>Últimos 30 días</div>
       </div>
@@ -279,7 +275,7 @@ function MetricsChart() {
       <div style={s.chartLegend}>
         <span style={s.legendDot} />
         <span style={{ color: C.muted, fontSize: '12px', fontFamily: '"Space Mono", monospace' }}>
-          Publicaciones procesadas
+          Propiedades analizadas
         </span>
       </div>
     </div>
@@ -553,17 +549,17 @@ export default function LandingPage() {
         backdropFilter: scrolled ? 'blur(16px)' : 'none',
         borderBottomColor: scrolled ? C.border : 'transparent',
       }}>
-        <div style={s.navInner}>
+        <div className="landing-nav-inner" style={s.navInner}>
           <div style={s.navLogo}>
-            <span style={s.logoIcon}>🏠</span>
-            <span style={s.logoText}>InmobiScrap</span>
+            <img src="/binoculars.png" alt="Prisma" width={26} height={26} style={{ objectFit: 'contain' }} />
+            <span style={s.logoText}>Prisma Inmobiliario</span>
             <span style={s.logoBadge}>Beta</span>
           </div>
 
-          <div style={s.navActions}>
+          <div className="landing-nav-actions" style={s.navActions}>
             {user ? (
               <>
-                <button style={s.navDashboardBtn} onClick={handleDashboard}>
+                <button className="nav-dashboard-btn" style={s.navDashboardBtn} onClick={handleDashboard}>
                   📊 Ver métricas →
                 </button>
 
@@ -580,7 +576,7 @@ export default function LandingPage() {
               </>
             ) : (
               <>
-                <button style={s.navLink} onClick={() => router.push('/login')}>
+                <button className="landing-nav-link" style={s.navLink} onClick={() => router.push('/login')}>
                   Iniciar sesión
                 </button>
                 <button style={s.navCta} onClick={() => router.push('/register')}>
@@ -593,29 +589,29 @@ export default function LandingPage() {
       </nav>
 
       {/* ── Hero ── */}
-      <section style={s.hero}>
+      <section className="landing-hero" style={s.hero}>
         <div style={s.heroContent}>
           <div style={s.heroBadge}>
             <span style={s.heroBadgeDot} />
-            Métricas inmobiliarias · IA + Datos estructurados
+            Inteligencia de mercado inmobiliario · Chile
           </div>
 
           <h1 style={s.heroTitle}>
-            Dashboards listos
+            Analiza el mercado
             <br />
-            <span style={s.heroTitleAccent}>para decisiones</span>
+            <span style={s.heroTitleAccent}>inmobiliario chileno</span>
             <br />
-            del mercado chileno
+            con datos reales
           </h1>
 
           <p style={s.heroDesc}>
-            InmobiScrap transforma datos de portales en métricas comparables.
-            Entra, filtra, y entiende precios, comunas, tipos y tendencias sin pelear con páginas caóticas.
+            Prisma Inmobiliario centraliza y analiza datos del mercado para que tomes decisiones informadas.
+            Filtra por región, comuna y tipo para entender precios, tendencias y oportunidades.
           </p>
 
           {/* CTAs */}
           {user ? (
-            <div style={s.heroCtas}>
+            <div className="landing-hero-ctas" style={s.heroCtas}>
               <button style={s.ctaPrimary} onClick={handleDashboard}>
                 📊 Ver Dashboard →
               </button>
@@ -630,7 +626,7 @@ export default function LandingPage() {
               )}
             </div>
           ) : (
-            <div style={s.heroCtas}>
+            <div className="landing-hero-ctas" style={s.heroCtas}>
               <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
                 📊 Ver métricas gratis
               </button>
@@ -640,15 +636,15 @@ export default function LandingPage() {
             </div>
           )}
 
-          <div style={s.heroSources}>
-            <span style={s.heroSourcesLabel}>Fuentes:</span>
-            {SOURCES.map((src) => (
-              <span key={src} style={s.sourceChip}>{src}</span>
+          <div className="landing-hero-sources" style={s.heroSources}>
+            <span style={s.heroSourcesLabel}>Cobertura:</span>
+            {['Región Metropolitana', 'Valparaíso', 'Biobío', 'La Araucanía', 'Coquimbo', '+11 regiones'].map((r) => (
+              <span key={r} style={s.sourceChip}>{r}</span>
             ))}
           </div>
         </div>
 
-        <div style={s.heroTerminal}>
+        <div className="landing-hero-terminal" style={s.heroTerminal}>
           <Terminal />
         </div>
       </section>
@@ -661,7 +657,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Planes ── */}
-      <section style={s.section}>
+      <section className="landing-section" style={s.section}>
         <div style={s.sectionHeader}>
           <div style={s.sectionTag}>Planes</div>
           <h2 style={s.sectionTitle}>Elige cómo consumir métricas</h2>
@@ -670,28 +666,28 @@ export default function LandingPage() {
           </p>
         </div>
 
-        <div style={s.plansGrid}>
+        <div className="landing-plans-grid" style={s.plansGrid}>
           {PLANS.map((p) => (
             <PlanCard key={p.id} plan={p} onSelect={handlePlanSelect} isCurrentPro={isPro} />
           ))}
         </div>
 
         <div style={s.plansFootnote}>
-          Nota: los precios están en CLP. La UI es informativa; compras y upgrades deben validarse en backend con control transaccional.
+          Precios en CLP. Pagos procesados de forma segura por MercadoPago.
         </div>
       </section>
 
       {/* ── Stats ── */}
       <section style={s.statsSection}>
-        <div style={s.statsGrid}>
+        <div className="landing-stats-grid" style={s.statsGrid}>
           {[
-            { value: '6+',   label: 'Portales integrados'    },
-            { value: 'LLM',  label: 'Extracción inteligente' },
-            { value: 'RT',   label: 'Logs en tiempo real'    },
-            { value: 'Cron', label: 'Programación automática'},
+            { value: '16',   label: 'Regiones de Chile'       },
+            { value: 'IA',   label: 'Análisis inteligente'    },
+            { value: 'RT',   label: 'Datos en tiempo real'    },
+            { value: 'PDF',  label: 'Informes descargables'   },
           ].map((stat) => (
-            <div key={stat.label} style={s.statItem}>
-              <div style={s.statValue}>{stat.value}</div>
+            <div key={stat.label} className="landing-stat-item" style={s.statItem}>
+              <div className="landing-stat-value" style={s.statValue}>{stat.value}</div>
               <div style={s.statLabel}>{stat.label}</div>
             </div>
           ))}
@@ -699,21 +695,21 @@ export default function LandingPage() {
       </section>
 
       {/* ── Features ── */}
-      <section style={s.section}>
+      <section className="landing-section" style={s.section}>
         <div style={s.sectionHeader}>
           <div style={s.sectionTag}>Funcionalidades</div>
-          <h2 style={s.sectionTitle}>Métricas, trazabilidad<br />y datos útiles</h2>
+          <h2 style={s.sectionTitle}>Todo lo que necesitas<br />para analizar el mercado</h2>
           <p style={s.sectionDesc}>
-            Enfocado en consumo de insights: menos fricción, más decisiones.
+            Enfocado en darte insights accionables: menos fricción, mejores decisiones.
           </p>
         </div>
-        <div style={s.featuresGrid}>
+        <div className="landing-features-grid" style={s.featuresGrid}>
           {FEATURES.map((f) => <FeatureCard key={f.title} {...f} />)}
         </div>
       </section>
 
       {/* ── Stack ── */}
-      <section style={{ ...s.section, ...s.stackSection }}>
+      <section className="landing-stack-section" style={{ ...s.section, ...s.stackSection }}>
         <div style={s.sectionHeader}>
           <div style={s.sectionTag}>Stack tecnológico</div>
           <h2 style={s.sectionTitle}>Construido con tecnologías<br />de producción</h2>
@@ -729,8 +725,8 @@ export default function LandingPage() {
       </section>
 
       {/* ── CTA final ── */}
-      <section style={s.ctaSection}>
-        <div style={s.ctaBox}>
+      <section className="landing-cta-section" style={s.ctaSection}>
+        <div className="landing-cta-box" style={s.ctaBox}>
           <div style={s.ctaGlow} />
           {user ? (
             <>
@@ -738,7 +734,7 @@ export default function LandingPage() {
               <p style={s.ctaDesc}>
                 Entra al dashboard y revisa tendencias, comunas y precios en segundos.
               </p>
-              <div style={s.heroCtas}>
+              <div className="landing-hero-ctas" style={s.heroCtas}>
                 <button style={s.ctaPrimary} onClick={handleDashboard}>
                   📊 Ver Dashboard →
                 </button>
@@ -746,11 +742,11 @@ export default function LandingPage() {
             </>
           ) : (
             <>
-              <h2 style={s.ctaTitle}>Mira las métricas hoy</h2>
+              <h2 style={s.ctaTitle}>Empieza a analizar hoy</h2>
               <p style={s.ctaDesc}>
-                Crea tu cuenta y accede al dashboard con recarga diaria de créditos en el plan Base.
+                Crea tu cuenta gratis y accede al dashboard con créditos incluidos en el plan Base.
               </p>
-              <div style={s.heroCtas}>
+              <div className="landing-hero-ctas" style={s.heroCtas}>
                 <button style={s.ctaPrimary} onClick={() => router.push('/register')}>
                   Crear cuenta gratis
                 </button>
@@ -765,10 +761,10 @@ export default function LandingPage() {
 
       {/* ── Footer ── */}
       <footer style={s.footer}>
-        <div style={s.footerInner}>
+        <div className="landing-footer-inner" style={s.footerInner}>
           <div style={s.navLogo}>
-            <span style={s.logoIcon}>🏠</span>
-            <span style={{ ...s.logoText, fontSize: '14px' }}>InmobiScrap</span>
+            <img src="/binoculars.png" alt="Prisma" width={20} height={20} style={{ objectFit: 'contain' }} />
+            <span style={{ ...s.logoText, fontSize: '14px' }}>Prisma Inmobiliario</span>
           </div>
           <div style={s.footerRight}>
             <span style={{ color: C.muted, fontSize: '13px' }}>Hecho con ❤️ en Chile 🇨🇱</span>
@@ -785,6 +781,33 @@ export default function LandingPage() {
         @keyframes float  { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
         @keyframes glow   { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.7; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ── Mobile responsive ── */
+        @media (max-width: 768px) {
+          .landing-nav-inner { padding: 10px 16px !important; }
+          .landing-nav-actions { gap: 8px !important; }
+          .landing-nav-actions .nav-dashboard-btn { display: none !important; }
+          .landing-hero { padding: 100px 16px 40px !important; gap: 32px !important; flex-direction: column !important; }
+          .landing-hero-terminal { animation: none !important; min-width: 0 !important; }
+          .landing-section { padding: 50px 16px !important; }
+          .landing-features-grid { grid-template-columns: 1fr !important; }
+          .landing-plans-grid { grid-template-columns: 1fr !important; }
+          .landing-stats-grid { grid-template-columns: repeat(2, 1fr) !important; padding: 24px 16px !important; }
+          .landing-stat-item { border-right: none !important; padding: 12px !important; }
+          .landing-stack-section { padding: 50px 16px !important; }
+          .landing-cta-section { padding: 50px 16px !important; }
+          .landing-cta-box { padding: 36px 20px !important; }
+          .landing-footer-inner { justify-content: center !important; text-align: center; }
+          .landing-hero-sources { justify-content: center; }
+          .landing-hero-ctas { justify-content: center; }
+        }
+        @media (max-width: 480px) {
+          .landing-hero { padding: 90px 12px 32px !important; }
+          .landing-section { padding: 40px 12px !important; }
+          .landing-stats-grid { grid-template-columns: 1fr 1fr !important; }
+          .landing-stat-value { font-size: 24px !important; }
+          .landing-nav-link { display: none !important; }
+        }
       `}</style>
     </div>
   );

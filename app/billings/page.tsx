@@ -100,10 +100,24 @@ function BillingsContent() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: '"Syne", "Inter", sans-serif' }}>
-      <style>{`body { margin: 0; background: #080c10; }`}</style>
+      <style>{`
+        body { margin: 0; background: #080c10; }
+        @media (max-width: 640px) {
+          .billings-content { padding: 20px 12px 40px !important; }
+          .billings-nav { padding: 12px 16px !important; }
+          .billings-stats-grid { grid-template-columns: 1fr !important; }
+          .billings-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          .billings-table-header, .billings-table-row {
+            grid-template-columns: 100px 1.5fr 90px 70px !important;
+            min-width: 400px;
+            padding: 10px 12px !important;
+            font-size: 11px !important;
+          }
+        }
+      `}</style>
 
       {/* ── Top nav ── */}
-      <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.border}22`, display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="billings-nav" style={{ padding: '16px 24px', borderBottom: `1px solid ${C.border}22`, display: 'flex', alignItems: 'center', gap: '12px' }}>
         <button
           onClick={() => router.back()}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'none', border: 'none', color: C.muted, fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
@@ -114,7 +128,7 @@ function BillingsContent() {
         <span style={{ fontSize: '13px', color: C.muted }}>Mis compras</span>
       </div>
 
-      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '40px 24px 80px' }}>
+      <div className="billings-content" style={{ maxWidth: '860px', margin: '0 auto', padding: '40px 24px 80px' }}>
 
         {/* ── Header ── */}
         <div style={{ marginBottom: '36px' }}>
@@ -176,7 +190,7 @@ function BillingsContent() {
 
         {/* ── Stats ── */}
         {!loading && payments.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '32px' }}>
+          <div className="billings-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '32px' }}>
             {[
               { label: 'Total gastado', value: fmtCLP(totalSpent), color: C.primary, icon: '💳' },
               { label: 'Créditos comprados', value: totalCredits > 0 ? `+${totalCredits.toLocaleString('es-CL')}` : '—', color: C.accent, icon: '⚡' },
@@ -234,9 +248,9 @@ function BillingsContent() {
           </div>
         ) : (
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: '16px', overflow: 'hidden' }}>
-
+           <div className="billings-table-wrapper">
             {/* Table header */}
-            <div style={{
+            <div className="billings-table-header" style={{
               display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 80px',
               padding: '12px 20px',
               borderBottom: `1px solid ${C.border}`,
@@ -255,6 +269,7 @@ function BillingsContent() {
               return (
                 <div
                   key={p.id}
+                  className="billings-table-row"
                   style={{
                     display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 80px',
                     padding: '14px 20px', alignItems: 'center',
@@ -313,6 +328,7 @@ function BillingsContent() {
                 </div>
               );
             })}
+           </div>
           </div>
         )}
 

@@ -1234,16 +1234,16 @@ export default function Dashboard() {
       transition: 'transform 0.2s, box-shadow 0.2s',
       '&:hover': { transform: 'translateY(-2px)', boxShadow: 3 },
     }}>
-      <CardContent sx={{ p: 2.5 }}>
+      <CardContent sx={{ p: { xs: 1.5, sm: 2.5 } }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-          <Typography variant="body2" sx={{ color: COLORS.mutedText, fontWeight: 500, fontSize: '0.8rem' }}>
+          <Typography variant="body2" sx={{ color: COLORS.mutedText, fontWeight: 500, fontSize: { xs: '0.7rem', sm: '0.8rem' } }}>
             {title}
           </Typography>
-          <Box sx={{ color, opacity: 0.7 }}>{icon}</Box>
+          <Box sx={{ color, opacity: 0.7, display: { xs: 'none', sm: 'flex' } }}>{icon}</Box>
         </Box>
         {loading
           ? <Skeleton width="60%" height={40} />
-          : <Typography variant="h4" sx={{ fontWeight: 700, color: COLORS.darkText, letterSpacing: '-0.5px' }}>{value}</Typography>
+          : <Typography variant="h4" sx={{ fontWeight: 700, color: COLORS.darkText, letterSpacing: '-0.5px', fontSize: { xs: '1.3rem', sm: '2.125rem' } }}>{value}</Typography>
         }
         {subtitle && (
           <Typography variant="caption" sx={{ color: COLORS.mutedText, mt: 0.5, display: 'block' }}>{subtitle}</Typography>
@@ -1260,7 +1260,7 @@ export default function Dashboard() {
   );
 
   const ChartPaper = ({ children, sx: sxProp }: { children: React.ReactNode; sx?: object }) => (
-    <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e9ecef', background: COLORS.cardBg, ...sxProp }}>
+    <Paper elevation={0} sx={{ p: { xs: 1.5, sm: 2, md: 3 }, borderRadius: 3, border: '1px solid #e9ecef', background: COLORS.cardBg, ...sxProp }}>
       {children}
     </Paper>
   );
@@ -1278,17 +1278,17 @@ export default function Dashboard() {
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: COLORS.bg, minHeight: '100vh' }}>
 
       {/* ─── Header ─── */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, gap: 2, flexWrap: 'wrap', flexDirection: { xs: 'column', sm: 'row' } }}>
         {/* Left: Title */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Button variant="outlined" startIcon={<ArrowBackIcon />}
             onClick={() => router.push(isAdmin ? '/botdashboard' : '/')}
             sx={{ textTransform: 'none', borderRadius: 2, borderColor: '#ddd', color: COLORS.mutedText,
-              '&:hover': { borderColor: COLORS.primary, color: COLORS.primary } }}>
+              '&:hover': { borderColor: COLORS.primary, color: COLORS.primary }, display: { xs: 'none', sm: 'inline-flex' } }}>
             Volver
           </Button>
-          <Box sx={{ whiteSpace: 'nowrap' }}>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px' }}>
+          <Box>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: COLORS.darkText, letterSpacing: '-1px', fontSize: { xs: '1.4rem', sm: '2.125rem' } }}>
               Dashboard Inmobiliario
             </Typography>
             <Typography variant="body2" sx={{ color: COLORS.mutedText, mt: 0.5 }}>
@@ -1444,7 +1444,7 @@ export default function Dashboard() {
           value={metricsMode}
           exclusive
           onChange={(_, v) => { if (v) { setMetricsMode(v); setSelectedPropertyIds(new Set()); } }}
-          sx={{ '& .MuiToggleButton-root': { textTransform: 'none', px: 3, py: 1, fontSize: '0.95rem', fontWeight: 600 } }}
+          sx={{ '& .MuiToggleButton-root': { textTransform: 'none', px: { xs: 2, sm: 3 }, py: 1, fontSize: { xs: '0.8rem', sm: '0.95rem' }, fontWeight: 600 } }}
         >
           <ToggleButton value="general">
             <BarChartIcon sx={{ mr: 1, fontSize: 20 }} /> General
@@ -2817,7 +2817,7 @@ export default function Dashboard() {
                           </ComposedChart>
                         </ResponsiveContainer>
                         <Typography variant="caption" sx={{ color: COLORS.mutedText, display: 'block', mt: 0.5, textAlign: 'center' }}>
-                          Cada punto representa el último precio registrado ese día por scraping.
+                          Cada punto representa el último precio registrado ese día.
                         </Typography>
                       </>
                     ) : (
@@ -2906,7 +2906,7 @@ export default function Dashboard() {
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 1.5, mb: 2.5 }}>
                 {[
                   { label: 'Precio actual', value: fmt(prop.price), icon: <AttachMoneyIcon sx={{ fontSize: 18, color: COLORS.primary }} /> },
-                  { label: 'Veces scrapeado', value: prop.timesScraped.toLocaleString(), icon: <TimelineIcon sx={{ fontSize: 18, color: COLORS.accent }} /> },
+                  { label: 'Veces detectado', value: prop.timesScraped.toLocaleString(), icon: <TimelineIcon sx={{ fontSize: 18, color: COLORS.accent }} /> },
                   { label: 'Snapshots con cambios', value: timelineData.snapshotsWithChanges.toLocaleString(), icon: <ChangeCircleIcon sx={{ fontSize: 18, color: COLORS.warning }} /> },
                   { label: 'Detectado', value: formatDate(prop.firstSeenAt), icon: <CalendarTodayIcon sx={{ fontSize: 18, color: COLORS.success }} /> },
                   { label: 'Último visto', value: formatDate(prop.lastSeenAt), icon: <AccessTimeIcon sx={{ fontSize: 18, color: COLORS.mutedText }} /> },

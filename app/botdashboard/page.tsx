@@ -138,7 +138,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
-      PaperProps={{ sx: { height: '88vh', maxHeight: '88vh', borderRadius: 3 } }}>
+      PaperProps={{ sx: { height: { xs: '100vh', md: '88vh' }, maxHeight: { xs: '100vh', md: '88vh' }, borderRadius: { xs: 0, md: 3 }, m: { xs: 0, md: 4 } } }}>
 
       <DialogTitle sx={{ bgcolor: '#0f172a', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
@@ -155,7 +155,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
       <DialogContent sx={{ p: 3, overflowY: 'auto', bgcolor: '#f8f9fa' }}>
 
         {/* ── KPI rápidos ── */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 2, mb: 3 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
           <StatBox label="Total Bots"      value={bots.length}                                             color="#1565c0" />
           <StatBox label="Activos"         value={bots.filter((b) => b.isActive).length}                  color="#2a9d8f" />
           <StatBox label="Ejecutando ahora" value={bots.filter((b) => b.status === 'running').length}     color="#f57c00" />
@@ -163,7 +163,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
         </Box>
 
         {/* ── Fila 1: Estado + Distribución de status ── */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, mb: 3 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, mb: 3 }}>
 
           {/* Estado activo / inactivo */}
           <Paper elevation={0} sx={{ p: 3, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: 'white' }}>
@@ -252,7 +252,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <ShowChartIcon sx={{ color: '#1565c0', fontSize: 20 }} />
             <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
-              Top Bots por Propiedades Scrapeadas
+              Top Bots por Propiedades Recolectadas
             </Typography>
           </Box>
           {topBotsByScraped.length === 0 ? (
@@ -266,7 +266,7 @@ function BotStatsModal({ open, onClose, bots }: BotStatsModalProps) {
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
                 <Tooltip formatter={(v, n) => [(Number(v) || 0).toLocaleString('es-CL'), n]} />
-                <Bar dataKey="total" fill={CHART_COLORS.primary} name="Total scrapeadas" radius={[0, 4, 4, 0]}>
+                <Bar dataKey="total" fill={CHART_COLORS.primary} name="Total recolectadas" radius={[0, 4, 4, 0]}>
                   {topBotsByScraped.map((_, i) => (
                     <Cell key={i} fill={i === 0 ? '#1565c0' : i === 1 ? '#1976d2' : '#42a5f5'} />
                   ))}
@@ -467,17 +467,17 @@ export default function Home() {
   ];
 
   return (
-    <Box sx={{ padding: 4, backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
-      <Paper elevation={3} sx={{ padding: 3, borderRadius: 2 }}>
+    <Box sx={{ padding: { xs: 1.5, sm: 2, md: 4 }, backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
+      <Paper elevation={3} sx={{ padding: { xs: 1.5, sm: 2, md: 3 }, borderRadius: 2 }}>
 
         {/* ── Header ── */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, mb: 3, flexWrap: 'wrap', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
           <Box>
-            <Typography variant="h4" component="h1" sx={{ fontWeight: 600, color: '#1976d2', mb: 0.5 }}>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 600, color: '#1976d2', mb: 0.5, fontSize: { xs: '1.5rem', sm: '2.125rem' } }}>
               Gestión de Bots
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Administra, ejecuta y monitorea tus bots de scraping
+              Administra, ejecuta y monitorea tus bots de recolección
             </Typography>
           </Box>
 
@@ -562,7 +562,7 @@ export default function Home() {
         </Box>
 
         {/* ── DataGrid ── */}
-        <Box sx={{ height: 600, width: '100%' }}>
+        <Box sx={{ height: { xs: 450, md: 600 }, width: '100%', overflowX: 'auto' }}>
           <DataGrid rows={dataBots} columns={columns} loading={loading}
             pageSizeOptions={[10, 25, 50]}
             initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
@@ -605,7 +605,7 @@ export default function Home() {
         </DialogTitle>
         <DialogContent sx={{ pt: 3 }}>
           <DialogContentText>
-            ¿Eliminar permanentemente <strong>"{deleteDialog.bot?.name}"</strong>? Las propiedades ya scrapeadas se conservan.
+            ¿Eliminar permanentemente <strong>"{deleteDialog.bot?.name}"</strong>? Las propiedades ya recolectadas se conservan.
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
